@@ -25,9 +25,10 @@ export const appRouter = router({
     getByExercise: publicProcedure
       .input(z.object({
         exercise: z.string(),
-        gymId: z.number().optional()
+        gymId: z.number().optional(),
+        gender: z.enum(["male", "female"]).optional()
       }))
-      .query(({ input }) => getLeaderboardByExercise(input.exercise, input.gymId)),
+      .query(({ input }) => getLeaderboardByExercise(input.exercise, input.gymId, input.gender)),
   }),
 
   gym: router({
@@ -234,6 +235,7 @@ export const appRouter = router({
         pullUpsReps: z.number().optional(),
         pullUpsWeight: z.number().optional(),
         avatarUrl: z.string().optional(),
+        gender: z.enum(["male", "female"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         await enforceAthleteOwnership(input.athleteId, ctx.user);
@@ -258,6 +260,7 @@ export const appRouter = router({
           pullUpsReps: updates.pullUpsReps,
           pullUpsWeight: updates.pullUpsWeight !== undefined ? String(updates.pullUpsWeight) : undefined,
           avatarUrl: updates.avatarUrl,
+          gender: updates.gender,
           total: newTotal,
         });
       }),
@@ -265,6 +268,7 @@ export const appRouter = router({
     setupProfile: protectedProcedure
       .input(z.object({
         name: z.string(),
+        gender: z.enum(["male", "female"]),
         squat: z.number().optional(),
         bench: z.number().optional(),
         deadlift: z.number().optional(),
@@ -290,6 +294,7 @@ export const appRouter = router({
           name: input.name,
           email: ctx.user.email,
           avatarUrl: input.avatarUrl,
+          gender: input.gender,
           squat: input.squat !== undefined ? String(input.squat) : null,
           bench: input.bench !== undefined ? String(input.bench) : null,
           deadlift: input.deadlift !== undefined ? String(input.deadlift) : null,

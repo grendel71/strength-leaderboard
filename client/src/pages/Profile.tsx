@@ -71,6 +71,7 @@ export default function Profile() {
     pullUpsReps: "",
     pullUpsWeight: "",
     avatarUrl: "",
+    gender: "" as "" | "male" | "female",
   });
 
   const [newLift, setNewLift] = useState({
@@ -142,6 +143,7 @@ export default function Profile() {
         pullUpsReps: parseIntInput(formData.pullUpsReps),
         pullUpsWeight: parseNumberInput(formData.pullUpsWeight),
         avatarUrl: formData.avatarUrl || undefined,
+        gender: formData.gender ? formData.gender as "male" | "female" : undefined,
       });
       setIsEditing(false);
       refetchAthlete();
@@ -302,6 +304,7 @@ export default function Profile() {
         pullUpsReps: athlete.pullUpsReps?.toString() || "",
         pullUpsWeight: athlete.pullUpsWeight?.toString() || "",
         avatarUrl: athlete.avatarUrl || "",
+        gender: (athlete.gender as "" | "male" | "female") || "",
       });
     }
   }, [athlete]);
@@ -459,6 +462,13 @@ export default function Profile() {
                     {athlete.bodyWeight ? `${athlete.bodyWeight} lbs` : "No BW"}
                   </span>
                 </div>
+                {athlete.gender && (
+                  <div className="flex items-center gap-2 px-3 py-1 bg-muted/30 border border-border rounded-full">
+                    <span className="text-[10px] uppercase font-black text-muted-foreground tracking-widest">
+                      {athlete.gender === "male" ? "🏋️ Male" : "💪 Female"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -567,6 +577,31 @@ export default function Profile() {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Enter your name"
                   />
+                </div>
+                <div>
+                  <Label className="text-accent uppercase font-bold text-[10px] mb-1 block">Gender</Label>
+                  <div className="flex bg-card/50 border border-border rounded-lg p-1 h-12">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, gender: "male" })}
+                      className={`flex-1 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "male"
+                          ? "bg-accent text-black shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                        }`}
+                    >
+                      🏋️ Male
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, gender: "female" })}
+                      className={`flex-1 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "female"
+                          ? "bg-accent text-black shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                        }`}
+                    >
+                      💪 Female
+                    </button>
+                  </div>
                 </div>
               </div>
 

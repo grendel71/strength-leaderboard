@@ -20,6 +20,7 @@ export default function Onboarding() {
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
         name: "",
+        gender: "" as "" | "male" | "female",
         bodyWeight: "",
         squat: "",
         bench: "",
@@ -126,6 +127,7 @@ export default function Onboarding() {
 
         await setupMutation.mutateAsync({
             name: formData.name,
+            gender: formData.gender as "male" | "female",
             avatarUrl: formData.avatarUrl || undefined,
             bodyWeight: parseNumberInput(formData.bodyWeight),
             squat: parseNumberInput(formData.squat),
@@ -199,6 +201,35 @@ export default function Onboarding() {
                                 </div>
 
                                 <div className="space-y-2">
+                                    <Label className="text-xs uppercase font-black text-accent tracking-widest">
+                                        Gender *
+                                    </Label>
+                                    <div className="flex bg-card/50 border border-border rounded-lg p-1 h-14">
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, gender: "male" })}
+                                            className={`flex-1 rounded-md text-sm font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "male"
+                                                    ? "bg-accent text-black shadow-sm"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            🏋️ Male
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, gender: "female" })}
+                                            className={`flex-1 rounded-md text-sm font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "female"
+                                                    ? "bg-accent text-black shadow-sm"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            💪 Female
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground uppercase font-bold">This determines which leaderboard you appear on.</p>
+                                </div>
+
+                                <div className="space-y-2">
                                     <Label htmlFor="name" className="text-xs uppercase font-black text-accent tracking-widest">
                                         Your Full Name
                                     </Label>
@@ -229,8 +260,8 @@ export default function Onboarding() {
 
                                 <Button
                                     type="button"
-                                    onClick={() => formData.name && setStep(2)}
-                                    disabled={!formData.name}
+                                    onClick={() => formData.name && formData.gender && setStep(2)}
+                                    disabled={!formData.name || !formData.gender}
                                     className="w-full btn-dramatic h-14 text-lg"
                                 >
                                     Next Step <ChevronRight className="ml-2 w-5 h-5" />

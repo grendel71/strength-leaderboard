@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export default function Leaderboard() {
   const { user, isAuthenticated, logout, loading } = useAuth();
   const [sortBy, setSortBy] = useState<"total" | "squat" | "bench" | "deadlift" | "ohp" | "farmersWalk" | "yokeWalk" | "dips" | "pullUps">("total");
+  const [genderFilter, setGenderFilter] = useState<"male" | "female">("male");
   const [selectedGymId, setSelectedGymId] = useState<number | undefined>(undefined);
   const [hasSetInitialGym, setHasSetInitialGym] = useState(false);
 
@@ -22,6 +23,7 @@ export default function Leaderboard() {
   const { data: athletes = [], isLoading } = trpc.leaderboard.getByExercise.useQuery({
     exercise: sortBy,
     gymId: selectedGymId,
+    gender: genderFilter,
   });
 
   const { data: athlete } = trpc.athlete.getById.useQuery(
@@ -86,6 +88,28 @@ export default function Leaderboard() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {/* Gender Toggle */}
+              <div className="flex bg-card/50 border border-accent/20 rounded-lg p-1 h-11 md:h-10">
+                <button
+                  onClick={() => setGenderFilter("male")}
+                  className={`flex-1 px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${genderFilter === "male"
+                      ? "bg-accent text-black shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  🏋️ Men
+                </button>
+                <button
+                  onClick={() => setGenderFilter("female")}
+                  className={`flex-1 px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${genderFilter === "female"
+                      ? "bg-accent text-black shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  💪 Women
+                </button>
+              </div>
 
               <div className="flex gap-2 sm:gap-3 flex-1 sm:flex-initial">
                 {loading ? null : isAuthenticated ? (

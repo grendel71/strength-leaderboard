@@ -219,15 +219,22 @@ export async function updateLiftRecord(id: number, data: Partial<InsertLiftRecor
   return db.update(liftRecords).set(data).where(eq(liftRecords.id, id));
 }
 
-export async function getLeaderboardByExercise(exerciseType: string, gymId?: number) {
+export async function getLeaderboardByExercise(exerciseType: string, gymId?: number, gender?: string) {
   const db = await getDb();
   if (!db) return [];
 
-  let baseQuery = db.select().from(athletes);
-
+  const conditions = [];
   if (gymId) {
-    // @ts-ignore - gymId added to athletes table
-    baseQuery = baseQuery.where(eq(athletes.gymId, gymId));
+    conditions.push(eq(athletes.gymId, gymId));
+  }
+  if (gender) {
+    conditions.push(eq(athletes.gender, gender));
+  }
+
+  let baseQuery = db.select().from(athletes);
+  if (conditions.length > 0) {
+    // @ts-ignore - dynamic where conditions
+    baseQuery = baseQuery.where(conditions.length === 1 ? conditions[0] : and(...conditions));
   }
 
   // Get all results and sort in JavaScript to handle NULL values properly

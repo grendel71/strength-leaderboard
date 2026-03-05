@@ -6,6 +6,7 @@ import { integer, pgEnum, pgTable, text, timestamp, varchar, decimal, date, inde
  * Columns use camelCase to match both database fields and generated types.
  */
 export const roleEnum = pgEnum("role", ["user", "admin"]);
+export const genderEnum = pgEnum("gender", ["male", "female"]);
 
 export const users = pgTable("users", {
   /**
@@ -56,6 +57,7 @@ export const athletes = pgTable("athletes", {
   pullUpsWeight: decimal("pullUpsWeight", { precision: 6, scale: 2 }),
   avatarUrl: text("avatarUrl"),
   email: varchar("email", { length: 320 }).unique(),
+  gender: varchar("gender", { length: 10 }),
   gymId: integer("gymId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -63,6 +65,7 @@ export const athletes = pgTable("athletes", {
   totalIdx: index("athletes_total_idx").on(table.total),
   emailIdx: index("athletes_email_idx").on(table.email),
   gymIdx: index("athletes_gym_idx").on(table.gymId),
+  genderIdx: index("athletes_gender_idx").on(table.gender),
 }));
 
 export const gyms = pgTable("gyms", {
