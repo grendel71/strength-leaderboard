@@ -433,7 +433,7 @@ export default function AthleteProfile() {
             <ScrollArea className="h-64 rounded border border-muted/20 p-2">
               <div className="space-y-2">
                 {communityUsers
-                  .filter(u => u.id !== athlete.userId) // Can't judge your own lift
+                  .filter(u => u.athleteId !== athleteId) // Can't judge your own lift
                   .map(u => (
                     <div 
                       key={u.id} 

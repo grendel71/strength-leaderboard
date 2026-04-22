@@ -736,8 +736,6 @@ export default function Profile() {
                   </div>
                 )}
 
-                )}
-
                 {/* Progress Bar UI */}
                 {uploadingVideo === stat.key && videoProgress && (
                   <div className="mt-3 px-2">
