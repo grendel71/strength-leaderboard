@@ -296,7 +296,7 @@ export default function Profile() {
   };
 
   // Compress video using Canvas + MediaRecorder
-  const compressVideo = (file: File): Promise<File> => {
+  const compressVideo = (file: File, duration: number): Promise<File> => {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.muted = true;
@@ -304,14 +304,9 @@ export default function Profile() {
       video.src = URL.createObjectURL(file);
 
       video.onloadedmetadata = () => {
-        // Target 720p max, maintain aspect ratio
-        const maxHeight = 720;
-        let width = video.videoWidth;
-        let height = video.videoHeight;
-        if (height > maxHeight) {
-          width = Math.round(width * (maxHeight / height));
-          height = maxHeight;
-        }
+        // Keep original resolution — no downscaling for quality
+        const width = video.videoWidth;
+        const height = video.videoHeight;
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -336,9 +331,16 @@ export default function Profile() {
           ? 'video/webm;codecs=vp9'
           : 'video/webm';
 
+        // Target 45MB to leave headroom, calculate bitrate from duration
+        const targetBytes = 45 * 1024 * 1024;
+        const targetBitsPerSecond = Math.min(
+          Math.floor((targetBytes * 8) / duration),
+          10_000_000 // cap at 10 Mbps
+        );
+
         const recorder = new MediaRecorder(stream, {
           mimeType,
-          videoBitsPerSecond: 2_500_000, // 2.5 Mbps
+          videoBitsPerSecond: targetBitsPerSecond,
         });
 
         const chunks: Blob[] = [];
@@ -412,7 +414,7 @@ export default function Profile() {
       let uploadFile: File = file;
       if (file.size > 50 * 1024 * 1024) {
         toast.info("Compressing video... this may take a moment.");
-        uploadFile = await compressVideo(file);
+        uploadFile = await compressVideo(file, duration);
         if (uploadFile.size > 50 * 1024 * 1024) {
           toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
           return;
