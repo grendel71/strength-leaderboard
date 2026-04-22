@@ -29,8 +29,7 @@ export default function Leaderboard() {
 
   // Fetch PR videos for the currently selected exercise
   const { data: exerciseVideos = [] } = trpc.athlete.getPrVideosByExercise.useQuery(
-    { exerciseType: sortBy },
-    { enabled: isAuthenticated }
+    { exerciseType: sortBy }
   );
   const videoMap = new Map<number, string>(exerciseVideos.map((v: any) => [v.athleteId, v.videoUrl]));
 
@@ -280,7 +279,7 @@ export default function Leaderboard() {
                     </div>
 
                     {/* PR Video button */}
-                    {isAuthenticated && videoMap.has(athlete.id) && (
+                    {videoMap.has(athlete.id) && (
                       <button
                         onClick={() => setPlayingVideo({ name: athlete.name, url: videoMap.get(athlete.id)! })}
                         className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 bg-accent/10 hover:bg-accent/20 rounded text-xs text-accent font-bold uppercase tracking-wider transition-all active:scale-95"
@@ -449,7 +448,7 @@ export default function Leaderboard() {
                           </td>
                           <td className="px-4 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              {isAuthenticated && videoMap.has(athlete.id) && (
+                              {videoMap.has(athlete.id) && (
                                 <button
                                   onClick={() => setPlayingVideo({ name: athlete.name, url: videoMap.get(athlete.id)! })}
                                   className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 rounded text-[10px] text-accent font-bold uppercase tracking-wider transition-all"
