@@ -440,3 +440,9 @@ export async function getPrVideosByExercise(exerciseType: string) {
   if (!db) return [];
   return db.select().from(prVideos).where(eq(prVideos.exerciseType, exerciseType));
 }
+
+export async function getAllPrVideos() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prVideos);
+}
