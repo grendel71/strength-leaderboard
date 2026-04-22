@@ -295,6 +295,82 @@ export default function Profile() {
     }
   };
 
+  // Compress video using Canvas + MediaRecorder
+  const compressVideo = (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.src = URL.createObjectURL(file);
+
+      video.onloadedmetadata = () => {
+        // Target 720p max, maintain aspect ratio
+        const maxHeight = 720;
+        let width = video.videoWidth;
+        let height = video.videoHeight;
+        if (height > maxHeight) {
+          width = Math.round(width * (maxHeight / height));
+          height = maxHeight;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+
+        // @ts-ignore - captureStream exists on canvas
+        const stream: MediaStream = canvas.captureStream(30);
+
+        // Try to capture audio from the video
+        try {
+          // @ts-ignore
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const source = audioCtx.createMediaElementSource(video);
+          const dest = audioCtx.createMediaStreamDestination();
+          source.connect(dest);
+          source.connect(audioCtx.destination);
+          dest.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+        } catch { /* video might have no audio */ }
+
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : 'video/webm';
+
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 2_500_000, // 2.5 Mbps
+        });
+
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          URL.revokeObjectURL(video.src);
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.webm'), { type: 'video/webm' });
+          resolve(compressed);
+        };
+        recorder.onerror = () => reject(new Error('Compression failed'));
+
+        recorder.start();
+        video.play();
+
+        const drawFrame = () => {
+          if (video.ended || video.paused) {
+            recorder.stop();
+            return;
+          }
+          ctx.drawImage(video, 0, 0, width, height);
+          requestAnimationFrame(drawFrame);
+        };
+
+        video.onplay = drawFrame;
+        video.onended = () => recorder.stop();
+      };
+
+      video.onerror = () => reject(new Error('Failed to load video for compression'));
+    });
+  };
+
   // PR Video upload handler
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>, exerciseType: string) => {
     const file = e.target.files?.[0];
@@ -306,15 +382,10 @@ export default function Profile() {
       return;
     }
 
-    // Check file size (50MB max)
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error("Video must be under 50MB.");
-      return;
-    }
-
     // Check video duration (40s max)
+    let duration = 0;
     try {
-      const duration = await new Promise<number>((resolve, reject) => {
+      duration = await new Promise<number>((resolve, reject) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.onloadedmetadata = () => {
@@ -336,13 +407,26 @@ export default function Profile() {
 
     try {
       setUploadingVideo(exerciseType);
-      const fileExt = file.name.split('.').pop();
+
+      // Auto-compress if over 50MB
+      let uploadFile: File = file;
+      if (file.size > 50 * 1024 * 1024) {
+        toast.info("Compressing video... this may take a moment.");
+        uploadFile = await compressVideo(file);
+        if (uploadFile.size > 50 * 1024 * 1024) {
+          toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
+          return;
+        }
+        toast.success(`Compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(uploadFile.size / 1024 / 1024).toFixed(1)}MB`);
+      }
+
+      const fileExt = uploadFile.name.split('.').pop() || 'webm';
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
       const filePath = `pr-videos/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
-        .upload(filePath, file, { upsert: true });
+        .upload(filePath, uploadFile, { upsert: true });
 
       if (uploadError) throw uploadError;
 
