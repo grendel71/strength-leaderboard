@@ -241,10 +241,10 @@ export default function AthleteProfile() {
                           setTempJudgeIds(currentJudges);
                           setSelectingJudges(stat.key);
                         }}
-                        className="p-1 bg-accent/10 hover:bg-accent/20 rounded text-accent transition-all"
+                        className="p-1.5 md:p-1 bg-accent/10 hover:bg-accent/20 rounded text-accent transition-all"
                         title="Select Judges"
                       >
-                        <Users className="w-3 h-3" />
+                        <Users className="w-4 h-4 md:w-3 md:h-3" />
                       </button>
                       {isOwner && (
                         <button
