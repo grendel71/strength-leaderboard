@@ -7,7 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { ArrowLeft, Edit2, Save, X, Plus, TrendingUp, History, Camera, Upload, MapPin, ShieldCheck, Users, Search } from "lucide-react";
+import { ArrowLeft, Edit2, Save, X, Plus, TrendingUp, History, Camera, Upload, MapPin, ShieldCheck, Users, Search, Video, Play, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/lib/supabase";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,6 +26,8 @@ export default function Profile() {
   const [newGymName, setNewGymName] = useState("");
   const [newGymSlug, setNewGymSlug] = useState("");
   const [newGymCode, setNewGymCode] = useState("");
+  const [uploadingVideo, setUploadingVideo] = useState<string | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ exercise: string; url: string } | null>(null);
 
   const { data: allUsers = [], refetch: refetchUsers } = trpc.admin.listUsers.useQuery(undefined, {
     enabled: user?.role === 'admin'
@@ -54,6 +56,14 @@ export default function Profile() {
     { athleteId: athleteId || 0 },
     { enabled: !!athleteId }
   );
+
+  // PR Videos
+  const { data: prVideos = [], refetch: refetchPrVideos } = trpc.athlete.getPrVideos.useQuery(
+    { athleteId: athleteId || 0 },
+    { enabled: !!athleteId }
+  );
+  const upsertPrVideoMutation = trpc.athlete.upsertPrVideo.useMutation();
+  const deletePrVideoMutation = trpc.athlete.deletePrVideo.useMutation();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -285,6 +295,88 @@ export default function Profile() {
     }
   };
 
+  // PR Video upload handler
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>, exerciseType: string) => {
+    const file = e.target.files?.[0];
+    if (!file || !athleteId) return;
+
+    // Check file type
+    if (!file.type.startsWith('video/')) {
+      toast.error("Please select a video file.");
+      return;
+    }
+
+    // Check file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error("Video must be under 50MB.");
+      return;
+    }
+
+    // Check video duration (40s max)
+    try {
+      const duration = await new Promise<number>((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(video.src);
+          resolve(video.duration);
+        };
+        video.onerror = () => reject(new Error('Failed to load video'));
+        video.src = URL.createObjectURL(file);
+      });
+
+      if (duration > 40) {
+        toast.error(`Video is ${Math.round(duration)}s — must be 40 seconds or less.`);
+        return;
+      }
+    } catch {
+      toast.error("Could not read video duration.");
+      return;
+    }
+
+    try {
+      setUploadingVideo(exerciseType);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
+      const filePath = `pr-videos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('pr-videos')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('pr-videos')
+        .getPublicUrl(filePath);
+
+      await upsertPrVideoMutation.mutateAsync({
+        athleteId,
+        exerciseType,
+        videoUrl: publicUrl,
+      });
+
+      refetchPrVideos();
+      toast.success(`PR video uploaded for ${exerciseType}!`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to upload video.");
+      console.error(error);
+    } finally {
+      setUploadingVideo(null);
+    }
+  };
+
+  const handleDeleteVideo = async (exerciseType: string) => {
+    if (!athleteId) return;
+    try {
+      await deletePrVideoMutation.mutateAsync({ athleteId, exerciseType });
+      refetchPrVideos();
+      toast.success("PR video deleted.");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete video.");
+    }
+  };
+
   // Sync form data when athlete loads
   useMemo(() => {
     if (athlete) {
@@ -479,22 +571,76 @@ export default function Profile() {
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
           {[
-            { label: "Squat", value: athlete.squat },
-            { label: "Bench", value: athlete.bench },
-            { label: "Deadlift", value: athlete.deadlift },
-            { label: "OHP", value: athlete.ohp },
-            { label: "Total", value: athlete.total },
-          ].map((stat) => (
-            <Card key={stat.label} className="card-dramatic p-4 text-center border-accent/20">
-              <div className="text-xl md:text-2xl font-bold text-accent">
-                {stat.value ? `${stat.value}` : "—"}
-              </div>
-              <div className="text-[10px] md:text-xs text-muted-foreground uppercase font-black tracking-widest mt-1">
-                {stat.label}
-              </div>
-            </Card>
-          ))}
+            { label: "Squat", value: athlete.squat, key: "squat" },
+            { label: "Bench", value: athlete.bench, key: "bench" },
+            { label: "Deadlift", value: athlete.deadlift, key: "deadlift" },
+            { label: "OHP", value: athlete.ohp, key: "ohp" },
+            { label: "Total", value: athlete.total, key: "total" },
+          ].map((stat) => {
+            const video = prVideos.find(v => v.exerciseType === stat.key);
+            const isOwner = user?.athleteId === athleteId;
+            return (
+              <Card key={stat.label} className="card-dramatic p-4 text-center border-accent/20 relative group">
+                <div className="text-xl md:text-2xl font-bold text-accent">
+                  {stat.value ? `${stat.value}` : "—"}
+                </div>
+                <div className="text-[10px] md:text-xs text-muted-foreground uppercase font-black tracking-widest mt-1">
+                  {stat.label}
+                </div>
+                {/* Video buttons */}
+                <div className="flex items-center justify-center gap-1 mt-2">
+                  {video && isAuthenticated && (
+                    <button
+                      onClick={() => setPlayingVideo({ exercise: stat.label, url: video.videoUrl })}
+                      className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 rounded text-[10px] text-accent font-bold uppercase tracking-wider transition-all"
+                    >
+                      <Play className="w-3 h-3" /> Watch
+                    </button>
+                  )}
+                  {isOwner && (
+                    <label className="flex items-center gap-1 px-2 py-1 bg-muted/30 hover:bg-muted/50 rounded text-[10px] text-muted-foreground hover:text-foreground font-bold uppercase tracking-wider transition-all cursor-pointer">
+                      <Video className="w-3 h-3" />
+                      {uploadingVideo === stat.key ? "..." : video ? "Replace" : "Upload"}
+                      <input
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={(e) => handleVideoUpload(e, stat.key)}
+                        disabled={uploadingVideo !== null}
+                      />
+                    </label>
+                  )}
+                  {isOwner && video && (
+                    <button
+                      onClick={() => handleDeleteVideo(stat.key)}
+                      className="p-1 bg-red-500/10 hover:bg-red-500/20 rounded text-red-400 transition-all"
+                      title="Delete video"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
+
+        {/* Video Playback Dialog */}
+        <Dialog open={!!playingVideo} onOpenChange={(open) => !open && setPlayingVideo(null)}>
+          <DialogContent className="sm:max-w-2xl bg-black border-accent/30">
+            <DialogTitle className="text-accent uppercase font-black tracking-widest text-sm">
+              {playingVideo?.exercise} PR Video
+            </DialogTitle>
+            {playingVideo && (
+              <video
+                src={playingVideo.url}
+                controls
+                autoPlay
+                className="w-full rounded-lg max-h-[70vh]"
+              />
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Add Lift Overlay/Modal-like Card */}
         {isAddingLift && (

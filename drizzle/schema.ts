@@ -143,3 +143,20 @@ export const gymRequests = pgTable("gymRequests", {
 
 export type GymRequest = typeof gymRequests.$inferSelect;
 export type InsertGymRequest = typeof gymRequests.$inferInsert;
+
+/**
+ * PR Videos - stores PR video URLs for each athlete per exercise type
+ */
+export const prVideos = pgTable("prVideos", {
+  id: serial("id").primaryKey(),
+  athleteId: integer("athleteId").notNull(),
+  exerciseType: varchar("exerciseType", { length: 50 }).notNull(),
+  videoUrl: text("videoUrl").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  athleteIdx: index("prVideos_athlete_idx").on(table.athleteId),
+  athleteExerciseIdx: index("prVideos_athlete_exercise_idx").on(table.athleteId, table.exerciseType),
+}));
+
+export type PrVideo = typeof prVideos.$inferSelect;
+export type InsertPrVideo = typeof prVideos.$inferInsert;

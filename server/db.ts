@@ -2,7 +2,7 @@ import { eq, and, desc, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pkg from 'pg';
 const { Pool } = pkg;
-import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest } from "../drizzle/schema";
+import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
@@ -413,4 +413,25 @@ export async function updateUserRole(userId: number, role: 'user' | 'admin') {
   const db = await getDb();
   if (!db) return;
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+// PR Videos
+export async function getPrVideos(athleteId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prVideos).where(eq(prVideos.athleteId, athleteId));
+}
+
+export async function upsertPrVideo(athleteId: number, exerciseType: string, videoUrl: string) {
+  const db = await getDb();
+  if (!db) return;
+  // Delete existing video for this athlete+exercise, then insert new one
+  await db.delete(prVideos).where(and(eq(prVideos.athleteId, athleteId), eq(prVideos.exerciseType, exerciseType)));
+  await db.insert(prVideos).values({ athleteId, exerciseType, videoUrl });
+}
+
+export async function deletePrVideo(athleteId: number, exerciseType: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(prVideos).where(and(eq(prVideos.athleteId, athleteId), eq(prVideos.exerciseType, exerciseType)));
 }

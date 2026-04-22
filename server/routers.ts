@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord } from "../drizzle/schema";
-import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById } from "./db";
+import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo } from "./db";
 
 export const appRouter = router({
   system: router({
@@ -348,6 +348,34 @@ export const appRouter = router({
           return athlete;
         }
         throw new Error("Failed to create athlete profile");
+      }),
+
+    // PR Videos
+    getPrVideos: publicProcedure
+      .input(z.object({ athleteId: z.number() }))
+      .query(({ input }) => getPrVideos(input.athleteId)),
+
+    upsertPrVideo: protectedProcedure
+      .input(z.object({
+        athleteId: z.number(),
+        exerciseType: z.string(),
+        videoUrl: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        await enforceAthleteOwnership(input.athleteId, ctx.user);
+        await upsertPrVideo(input.athleteId, input.exerciseType, input.videoUrl);
+        return { success: true };
+      }),
+
+    deletePrVideo: protectedProcedure
+      .input(z.object({
+        athleteId: z.number(),
+        exerciseType: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        await enforceAthleteOwnership(input.athleteId, ctx.user);
+        await deletePrVideo(input.athleteId, input.exerciseType);
+        return { success: true };
       }),
   }),
 });
