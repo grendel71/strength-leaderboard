@@ -296,90 +296,6 @@ export default function Profile() {
     }
   };
 
-  // Compress video using Canvas + MediaRecorder
-  const compressVideo = (file: File, duration: number): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.muted = true;
-      video.playsInline = true;
-      video.src = URL.createObjectURL(file);
-
-      video.onloadedmetadata = () => {
-        const width = video.videoWidth;
-        const height = video.videoHeight;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d')!;
-
-        // @ts-ignore - captureStream exists on canvas
-        const stream: MediaStream = canvas.captureStream(30);
-
-        try {
-          // @ts-ignore
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioCtx.createMediaElementSource(video);
-          const dest = audioCtx.createMediaStreamDestination();
-          source.connect(dest);
-          source.connect(audioCtx.destination);
-          dest.stream.getAudioTracks().forEach(track => stream.addTrack(track));
-        } catch { /* video might have no audio */ }
-
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-          ? 'video/webm;codecs=vp9'
-          : 'video/webm';
-
-        const targetBytes = 45 * 1024 * 1024;
-        const targetBitsPerSecond = Math.min(
-          Math.floor((targetBytes * 8) / duration),
-          10_000_000
-        );
-
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: targetBitsPerSecond,
-        });
-
-        const chunks: Blob[] = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = () => {
-          URL.revokeObjectURL(video.src);
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.webm'), { type: 'video/webm' });
-          resolve(compressed);
-        };
-        recorder.onerror = () => reject(new Error('Compression failed'));
-
-        recorder.start();
-        video.play();
-
-        // Track compression progress
-        const progressInterval = setInterval(() => {
-          if (duration > 0) {
-            const pct = Math.min(Math.round((video.currentTime / duration) * 100), 99);
-            setVideoProgress({ stage: 'Compressing', percent: pct });
-          }
-        }, 200);
-
-        const drawFrame = () => {
-          if (video.ended || video.paused) {
-            clearInterval(progressInterval);
-            recorder.stop();
-            return;
-          }
-          ctx.drawImage(video, 0, 0, width, height);
-          requestAnimationFrame(drawFrame);
-        };
-
-        video.onplay = drawFrame;
-        video.onended = () => { clearInterval(progressInterval); recorder.stop(); };
-      };
-
-      video.onerror = () => reject(new Error('Failed to load video for compression'));
-    });
-  };
-
   // PR Video upload handler
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>, exerciseType: string) => {
     const file = e.target.files?.[0];
@@ -391,10 +307,15 @@ export default function Profile() {
       return;
     }
 
+    // Check file size (50MB max — Supabase limit)
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error(`Video is ${(file.size / 1024 / 1024).toFixed(0)}MB — must be under 50MB. Try trimming or recording at a lower quality.`);
+      return;
+    }
+
     // Check video duration (40s max)
-    let duration = 0;
     try {
-      duration = await new Promise<number>((resolve, reject) => {
+      const duration = await new Promise<number>((resolve, reject) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.onloadedmetadata = () => {
@@ -416,44 +337,29 @@ export default function Profile() {
 
     try {
       setUploadingVideo(exerciseType);
-      setVideoProgress({ stage: 'Preparing', percent: 0 });
-
-      // Auto-compress if over 50MB
-      let uploadFile: File = file;
-      if (file.size > 50 * 1024 * 1024) {
-        setVideoProgress({ stage: 'Compressing', percent: 0 });
-        uploadFile = await compressVideo(file, duration);
-        if (uploadFile.size > 50 * 1024 * 1024) {
-          toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
-          return;
-        }
-        toast.success(`Compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(uploadFile.size / 1024 / 1024).toFixed(1)}MB`);
-      }
-
-      // Upload phase
       setVideoProgress({ stage: 'Uploading', percent: 0 });
 
-      const fileExt = uploadFile.name.split('.').pop() || 'webm';
+      const fileExt = file.name.split('.').pop();
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
       const filePath = `pr-videos/${fileName}`;
 
-      // Simulate upload progress (Supabase JS client doesn't expose it)
+      // Simulate upload progress
       const uploadProgressInterval = setInterval(() => {
         setVideoProgress(prev => {
           if (!prev || prev.percent >= 90) return prev;
-          return { stage: 'Uploading', percent: Math.min(prev.percent + 8, 90) };
+          return { stage: 'Uploading', percent: Math.min(prev.percent + 5, 90) };
         });
-      }, 300);
+      }, 400);
 
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
-        .upload(filePath, uploadFile, { upsert: true });
+        .upload(filePath, file, { upsert: true });
 
       clearInterval(uploadProgressInterval);
 
       if (uploadError) throw uploadError;
 
-      setVideoProgress({ stage: 'Finishing', percent: 95 });
+      setVideoProgress({ stage: 'Saving', percent: 95 });
 
       const { data: { publicUrl } } = supabase.storage
         .from('pr-videos')
