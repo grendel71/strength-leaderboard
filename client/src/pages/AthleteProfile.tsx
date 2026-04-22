@@ -203,6 +203,7 @@ export default function AthleteProfile() {
       <div className="container py-12">
         {/* Stats grid */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-12">
+          {[
             { label: "Squat", value: athlete.squat, key: "squat" },
             { label: "Bench", value: athlete.bench, key: "bench" },
             { label: "Deadlift", value: athlete.deadlift, key: "deadlift" },
