@@ -3,11 +3,12 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord } from "../drizzle/schema";
-import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos } from "./db";
+import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos, getPrVideoJudgments, getAllPrVideoJudgments, assignPrVideoJudges, submitPrVideoVote } from "./db";
 
 export const appRouter = router({
   system: router({
     version: publicProcedure.query(() => "1.0.2"),
+    getAllUsers: protectedProcedure.query(() => getAllUsers()),
   }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
@@ -361,6 +362,37 @@ export const appRouter = router({
 
     getAllPrVideos: publicProcedure
       .query(() => getAllPrVideos()),
+
+    getPrVideoJudgments: publicProcedure
+      .input(z.object({ athleteId: z.number(), exerciseType: z.string() }))
+      .query(({ input }) => getPrVideoJudgments(input.athleteId, input.exerciseType)),
+
+    getAllPrVideoJudgments: publicProcedure
+      .query(() => getAllPrVideoJudgments()),
+
+    assignPrVideoJudges: protectedProcedure
+      .input(z.object({
+        athleteId: z.number(),
+        exerciseType: z.string(),
+        judgeIds: z.array(z.number())
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Only athlete owner or admin can assign judges
+        if (ctx.user.role !== 'admin') {
+          await enforceAthleteOwnership(input.athleteId, ctx.user);
+        }
+        return assignPrVideoJudges(input.athleteId, input.exerciseType, input.judgeIds);
+      }),
+
+    submitPrVideoVote: protectedProcedure
+      .input(z.object({
+        athleteId: z.number(),
+        exerciseType: z.string(),
+        vote: z.enum(['white', 'red'])
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return submitPrVideoVote(input.athleteId, input.exerciseType, ctx.user.id, input.vote);
+      }),
 
     upsertPrVideo: protectedProcedure
       .input(z.object({

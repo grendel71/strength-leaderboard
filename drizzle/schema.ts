@@ -160,3 +160,23 @@ export const prVideos = pgTable("prVideos", {
 
 export type PrVideo = typeof prVideos.$inferSelect;
 export type InsertPrVideo = typeof prVideos.$inferInsert;
+
+/**
+ * PR Video Judgments - tracks judges and their votes for PR videos
+ */
+export const prVideoJudgments = pgTable("prVideoJudgments", {
+  id: serial("id").primaryKey(),
+  athleteId: integer("athleteId").notNull(),
+  exerciseType: varchar("exerciseType", { length: 50 }).notNull(),
+  judgeId: integer("judgeId").notNull(), // userId of the judge
+  vote: varchar("vote", { length: 10 }), // "white", "red", or null
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({
+  athleteExerciseIdx: index("prVideoJudgments_ae_idx").on(table.athleteId, table.exerciseType),
+  judgeIdx: index("prVideoJudgments_judge_idx").on(table.judgeId),
+  uniqueJudgment: index("prVideoJudgments_unique_idx").on(table.athleteId, table.exerciseType, table.judgeId),
+}));
+
+export type PrVideoJudgment = typeof prVideoJudgments.$inferSelect;
+export type InsertPrVideoJudgment = typeof prVideoJudgments.$inferInsert;

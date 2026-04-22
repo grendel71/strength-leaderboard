@@ -2,7 +2,7 @@ import { eq, and, desc, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pkg from 'pg';
 const { Pool } = pkg;
-import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos } from "../drizzle/schema";
+import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos, prVideoJudgments } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
@@ -445,4 +445,62 @@ export async function getAllPrVideos() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(prVideos);
+}
+
+// PR Video Judgments
+export async function getPrVideoJudgments(athleteId: number, exerciseType: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prVideoJudgments).where(
+    and(
+      eq(prVideoJudgments.athleteId, athleteId),
+      eq(prVideoJudgments.exerciseType, exerciseType)
+    )
+  );
+}
+
+export async function getAllPrVideoJudgments() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prVideoJudgments);
+}
+
+export async function assignPrVideoJudges(athleteId: number, exerciseType: string, judgeIds: number[]) {
+  const db = await getDb();
+  if (!db) return;
+
+  // Remove existing judges for this video
+  await db.delete(prVideoJudgments).where(
+    and(
+      eq(prVideoJudgments.athleteId, athleteId),
+      eq(prVideoJudgments.exerciseType, exerciseType)
+    )
+  );
+
+  // Insert new judges
+  const entries = judgeIds.map(judgeId => ({
+    athleteId,
+    exerciseType,
+    judgeId,
+    vote: null,
+  }));
+
+  if (entries.length > 0) {
+    await db.insert(prVideoJudgments).values(entries);
+  }
+}
+
+export async function submitPrVideoVote(athleteId: number, exerciseType: string, judgeId: number, vote: string) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(prVideoJudgments)
+    .set({ vote, updatedAt: new Date() })
+    .where(
+      and(
+        eq(prVideoJudgments.athleteId, athleteId),
+        eq(prVideoJudgments.exerciseType, exerciseType),
+        eq(prVideoJudgments.judgeId, judgeId)
+      )
+    );
 }

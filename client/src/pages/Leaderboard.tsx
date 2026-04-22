@@ -12,13 +12,30 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 // getLoginUrl removed
 
+type ExerciseId =
+  | "total"
+  | "squat"
+  | "bench"
+  | "deadlift"
+  | "ohp"
+  | "farmersWalk"
+  | "yokeWalk"
+  | "dips"
+  | "pullUps";
+
+type PrVideo = {
+  athleteId: number;
+  exerciseType: string;
+  videoUrl: string;
+};
+
 export default function Leaderboard() {
   const { user, isAuthenticated, logout, loading } = useAuth();
-  const [sortBy, setSortBy] = useState<"total" | "squat" | "bench" | "deadlift" | "ohp" | "farmersWalk" | "yokeWalk" | "dips" | "pullUps">("total");
+  const [sortBy, setSortBy] = useState<ExerciseId>("total");
   const [genderFilter, setGenderFilter] = useState<"male" | "female">("male");
   const [selectedGymId, setSelectedGymId] = useState<number | undefined>(undefined);
   const [hasSetInitialGym, setHasSetInitialGym] = useState(false);
-  const [playingVideo, setPlayingVideo] = useState<{ name: string; url: string; exercise: string } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ athleteId: number; name: string; url: string; exercise: string } | null>(null);
 
   const { data: gyms = [] } = trpc.gym.getAll.useQuery();
   const { data: athletes = [], isLoading } = trpc.leaderboard.getByExercise.useQuery({
@@ -30,10 +47,10 @@ export default function Leaderboard() {
   // Fetch ALL PR videos for the leaderboard
   const { data: allPrVideos = [] } = trpc.athlete.getAllPrVideos.useQuery();
   const athleteVideoMap = useMemo(() => {
-    const map = new Map<number, Array<{ exerciseType: string; videoUrl: string }>>();
-    allPrVideos.forEach((v: any) => {
-      if (!map.has(v.athleteId)) map.set(v.athleteId, []);
-      map.get(v.athleteId)!.push(v);
+    const map = new Map<number, PrVideo[]>();
+    allPrVideos.forEach((video: PrVideo) => {
+      if (!map.has(video.athleteId)) map.set(video.athleteId, []);
+      map.get(video.athleteId)!.push(video);
     });
     return map;
   }, [allPrVideos]);
@@ -42,6 +59,13 @@ export default function Leaderboard() {
     { id: (user as any)?.athleteId || 0 },
     { enabled: !!(user as any)?.athleteId && !hasSetInitialGym }
   );
+
+  const { data: allJudgments = [], refetch: refetchJudgments } = trpc.athlete.getAllPrVideoJudgments.useQuery();
+  const submitVoteMutation = trpc.athlete.submitPrVideoVote.useMutation({
+    onSuccess: () => {
+      refetchJudgments();
+    }
+  });
 
   useEffect(() => {
     if (athlete && !hasSetInitialGym) {
@@ -63,6 +87,86 @@ export default function Leaderboard() {
     { id: "dips", label: "Dips", icon: "📉" },
     { id: "pullUps", label: "Pull Ups", icon: "🦾" },
   ];
+
+  const getExerciseLabel = (exerciseType: string) => exercises.find((exercise) => exercise.id === exerciseType)?.label || exerciseType;
+  const getAthleteVideos = (athleteId: number) =>
+    [...(athleteVideoMap.get(athleteId) ?? [])].sort(
+      (left, right) =>
+        exercises.findIndex((exercise) => exercise.id === left.exerciseType) -
+        exercises.findIndex((exercise) => exercise.id === right.exerciseType)
+    );
+  const getVideoJudgments = (athleteId: number, exerciseType: string) =>
+    allJudgments.filter((judgment) => judgment.athleteId === athleteId && judgment.exerciseType === exerciseType);
+  const openVideo = (athleteId: number, athleteName: string, video: PrVideo) => {
+    setPlayingVideo({
+      athleteId,
+      name: athleteName,
+      url: video.videoUrl,
+      exercise: video.exerciseType,
+    });
+  };
+  const renderJudgmentStatus = (athleteId: number, exerciseType: string, variant: "mobile" | "desktop") => {
+    const videoJudgments = getVideoJudgments(athleteId, exerciseType);
+    if (videoJudgments.length === 0) return null;
+
+    const isApproved = videoJudgments.filter((judgment) => judgment.vote === "white").length >= 2;
+
+    if (variant === "mobile") {
+      return (
+        <div className="mt-2 flex items-center justify-between px-1">
+          <div className="flex gap-1">
+            {[0, 1, 2].map((index) => {
+              const judgment = videoJudgments[index];
+              return (
+                <div
+                  key={index}
+                  className={`w-2.5 h-2.5 rounded-full border ${
+                    judgment?.vote === "white"
+                      ? "bg-white border-white"
+                      : judgment?.vote === "red"
+                        ? "bg-red-600 border-red-600"
+                        : "bg-transparent border-muted-foreground/30"
+                  }`}
+                />
+              );
+            })}
+          </div>
+          {isApproved && (
+            <span className="text-[9px] font-black text-white bg-green-600 px-1.5 py-0.5 rounded shadow-[0_0_8px_rgba(22,163,74,0.4)]">
+              APPROVED
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="flex gap-0.5">
+          {[0, 1, 2].map((index) => {
+            const judgment = videoJudgments[index];
+            return (
+              <div
+                key={index}
+                className={`w-2 h-2 rounded-full border ${
+                  judgment?.vote === "white"
+                    ? "bg-white border-white"
+                    : judgment?.vote === "red"
+                      ? "bg-red-600 border-red-600"
+                      : "bg-transparent border-muted-foreground/20"
+                }`}
+              />
+            );
+          })}
+        </div>
+        {isApproved && (
+          <span className="text-[8px] font-black text-green-500 uppercase tracking-tighter">
+            Approved
+          </span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-20 md:pb-0">
@@ -265,7 +369,7 @@ export default function Leaderboard() {
                         </div>
                       </div>
                       <div className={`p-2 rounded ${['farmersWalk', 'yokeWalk', 'dips', 'pullUps'].includes(sortBy) ? 'bg-accent/10 border border-accent/20' : 'bg-muted/30'}`}>
-                        <div className="text-[10px] text-muted-foreground uppercase font-bold">{exercises.find(e => e.id === sortBy)?.label || sortBy}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase font-bold">{getExerciseLabel(sortBy)}</div>
                         <div className={`font-bold ${['farmersWalk', 'yokeWalk', 'dips', 'pullUps'].includes(sortBy) ? 'text-accent' : 'text-foreground'}`}>
                           {sortBy === 'farmersWalk' ? (athlete.farmersWalkWeight ? `${athlete.farmersWalkWeight} / ${athlete.farmersWalkDistance}m` : "—") :
                             sortBy === 'yokeWalk' ? (athlete.yokeWalkWeight ? `${athlete.yokeWalkWeight} / ${athlete.yokeWalkDistance}m` : "—") :
@@ -283,25 +387,21 @@ export default function Leaderboard() {
                       </div>
                     </div>
 
-                    {/* PR Video button */}
-                    {athleteVideoMap.has(athlete.id) && (
-                      <button
-                        onClick={() => {
-                          const videos = athleteVideoMap.get(athlete.id)!;
-                          const currentVideo = videos.find((v: any) => v.exerciseType === sortBy) || videos[0];
-                          setPlayingVideo({ 
-                            name: athlete.name, 
-                            url: currentVideo.videoUrl,
-                            exercise: currentVideo.exerciseType 
-                          });
-                        }}
-                        className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 bg-accent/10 hover:bg-accent/20 rounded text-xs text-accent font-bold uppercase tracking-wider transition-all active:scale-95"
-                      >
-                        <Play className="w-3.5 h-3.5" /> 
-                        {athleteVideoMap.get(athlete.id)!.some((v: any) => v.exerciseType === sortBy) 
-                          ? `Watch ${exercises.find(e => e.id === sortBy)?.label} PR`
-                          : `Watch PR (${exercises.find(e => e.id === athleteVideoMap.get(athlete.id)![0].exerciseType)?.label})`}
-                      </button>
+                    {getAthleteVideos(athlete.id).length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {getAthleteVideos(athlete.id).map((video) => (
+                          <div key={video.exerciseType} className="rounded border border-accent/10 bg-accent/5 p-2">
+                            <button
+                              onClick={() => openVideo(athlete.id, athlete.name, video)}
+                              className="w-full flex items-center justify-center gap-1.5 py-2 bg-accent/10 hover:bg-accent/20 rounded text-xs text-accent font-bold uppercase tracking-wider transition-all active:scale-95"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              {`Watch ${getExerciseLabel(video.exerciseType)} PR`}
+                            </button>
+                            {renderJudgmentStatus(athlete.id, video.exerciseType, "mobile")}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </Card>
                 ))}
@@ -463,24 +563,20 @@ export default function Leaderboard() {
                             {athlete.total || "—"}
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              {athleteVideoMap.has(athlete.id) && (
-                                <button
-                                  onClick={() => {
-                                    const videos = athleteVideoMap.get(athlete.id)!;
-                                    const currentVideo = videos.find((v: any) => v.exerciseType === sortBy) || videos[0];
-                                    setPlayingVideo({ 
-                                      name: athlete.name, 
-                                      url: currentVideo.videoUrl,
-                                      exercise: currentVideo.exerciseType 
-                                    });
-                                  }}
-                                  className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 rounded text-[10px] text-accent font-bold uppercase tracking-wider transition-all"
-                                  title={`Watch ${athleteVideoMap.get(athlete.id)![0].exerciseType} PR`}
-                                >
-                                  <Play className="w-3 h-3" /> PR
-                                </button>
-                              )}
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              {getAthleteVideos(athlete.id).map((video) => (
+                                <div key={video.exerciseType} className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => openVideo(athlete.id, athlete.name, video)}
+                                    className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 rounded text-[10px] text-accent font-bold uppercase tracking-wider transition-all"
+                                    title={`Watch ${getExerciseLabel(video.exerciseType)} PR`}
+                                  >
+                                    <Play className="w-3 h-3" />
+                                    {getExerciseLabel(video.exerciseType)}
+                                  </button>
+                                  {renderJudgmentStatus(athlete.id, video.exerciseType, "desktop")}
+                                </div>
+                              ))}
                               <Link href={`/athlete/${athlete.id}`}>
                                 <Button
                                   variant="ghost"
@@ -523,20 +619,83 @@ export default function Leaderboard() {
         </div>
       </div>
 
-    {/* Video Playback Dialog */}
+    {/* Video Playback & Judging Dialog */}
     <Dialog open={!!playingVideo} onOpenChange={(open) => !open && setPlayingVideo(null)}>
       <DialogContent className="sm:max-w-2xl bg-black border-accent/30 p-3 sm:p-6">
-        <DialogTitle className="text-accent uppercase font-black tracking-widest text-xs sm:text-sm">
-          {playingVideo?.name} — {exercises.find(e => e.id === playingVideo?.exercise)?.label || playingVideo?.exercise} PR
+        <DialogTitle className="text-accent uppercase font-black tracking-widest text-xs sm:text-sm mb-4">
+          {playingVideo?.name} — {getExerciseLabel(playingVideo?.exercise || "")} PR
         </DialogTitle>
         {playingVideo && (
-          <video
-            src={playingVideo.url}
-            controls
-            autoPlay
-            playsInline
-            className="w-full rounded-lg max-h-[70vh]"
-          />
+          <div className="space-y-6">
+            <video
+              src={playingVideo.url}
+              controls
+              autoPlay
+              playsInline
+              className="w-full aspect-video rounded-lg shadow-[0_0_30px_rgba(216,180,105,0.2)] border border-accent/20"
+            />
+
+            {/* Judging Interface inside Dialog */}
+            <div className="bg-accent/5 border border-accent/10 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-accent">Official Judging</h4>
+                <div className="flex gap-2">
+                  {[0, 1, 2].map((i) => {
+                    const videoJudgments = getVideoJudgments(playingVideo.athleteId, playingVideo.exercise);
+                    const judgment = videoJudgments[i];
+                    return (
+                      <div 
+                        key={i} 
+                        className={`w-4 h-4 rounded-full border shadow-sm ${
+                          judgment?.vote === 'white' ? 'bg-white border-white' : 
+                          judgment?.vote === 'red' ? 'bg-red-600 border-red-600' : 
+                          'bg-transparent border-muted-foreground/30'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Voting Buttons for assigned judge */}
+              {(() => {
+                const myJudgment = allJudgments.find(j => 
+                  j.athleteId === playingVideo.athleteId && 
+                  j.exerciseType === playingVideo.exercise && 
+                  j.judgeId === user?.id
+                );
+
+                if (!myJudgment) return (
+                  <p className="text-[10px] text-muted-foreground italic text-center py-2">
+                    You are not assigned as a judge for this lift.
+                  </p>
+                );
+
+                return (
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={() => submitVoteMutation.mutate({ athleteId: playingVideo.athleteId, exerciseType: playingVideo.exercise, vote: 'white' })}
+                      disabled={submitVoteMutation.isPending || myJudgment.vote === 'white'}
+                      className={`flex-1 h-12 rounded-lg font-black uppercase tracking-widest transition-all ${
+                        myJudgment.vote === 'white' ? 'bg-white text-black border-white' : 'bg-transparent border-white text-white hover:bg-white hover:text-black'
+                      } border-2`}
+                    >
+                      White Light
+                    </Button>
+                    <Button
+                      onClick={() => submitVoteMutation.mutate({ athleteId: playingVideo.athleteId, exerciseType: playingVideo.exercise, vote: 'red' })}
+                      disabled={submitVoteMutation.isPending || myJudgment.vote === 'red'}
+                      className={`flex-1 h-12 rounded-lg font-black uppercase tracking-widest transition-all ${
+                        myJudgment.vote === 'red' ? 'bg-red-600 text-white border-red-600' : 'bg-transparent border-red-600 text-red-600 hover:bg-red-600 hover:text-white'
+                      } border-2`}
+                    >
+                      Red Light
+                    </Button>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
         )}
       </DialogContent>
     </Dialog>
