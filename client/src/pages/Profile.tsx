@@ -28,6 +28,7 @@ export default function Profile() {
   const [newGymCode, setNewGymCode] = useState("");
   const [uploadingVideo, setUploadingVideo] = useState<string | null>(null);
   const [playingVideo, setPlayingVideo] = useState<{ exercise: string; url: string } | null>(null);
+  const [videoProgress, setVideoProgress] = useState<{ stage: string; percent: number } | null>(null);
 
   const { data: allUsers = [], refetch: refetchUsers } = trpc.admin.listUsers.useQuery(undefined, {
     enabled: user?.role === 'admin'
@@ -304,7 +305,6 @@ export default function Profile() {
       video.src = URL.createObjectURL(file);
 
       video.onloadedmetadata = () => {
-        // Keep original resolution — no downscaling for quality
         const width = video.videoWidth;
         const height = video.videoHeight;
 
@@ -316,7 +316,6 @@ export default function Profile() {
         // @ts-ignore - captureStream exists on canvas
         const stream: MediaStream = canvas.captureStream(30);
 
-        // Try to capture audio from the video
         try {
           // @ts-ignore
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -331,11 +330,10 @@ export default function Profile() {
           ? 'video/webm;codecs=vp9'
           : 'video/webm';
 
-        // Target 45MB to leave headroom, calculate bitrate from duration
         const targetBytes = 45 * 1024 * 1024;
         const targetBitsPerSecond = Math.min(
           Math.floor((targetBytes * 8) / duration),
-          10_000_000 // cap at 10 Mbps
+          10_000_000
         );
 
         const recorder = new MediaRecorder(stream, {
@@ -356,8 +354,17 @@ export default function Profile() {
         recorder.start();
         video.play();
 
+        // Track compression progress
+        const progressInterval = setInterval(() => {
+          if (duration > 0) {
+            const pct = Math.min(Math.round((video.currentTime / duration) * 100), 99);
+            setVideoProgress({ stage: 'Compressing', percent: pct });
+          }
+        }, 200);
+
         const drawFrame = () => {
           if (video.ended || video.paused) {
+            clearInterval(progressInterval);
             recorder.stop();
             return;
           }
@@ -366,7 +373,7 @@ export default function Profile() {
         };
 
         video.onplay = drawFrame;
-        video.onended = () => recorder.stop();
+        video.onended = () => { clearInterval(progressInterval); recorder.stop(); };
       };
 
       video.onerror = () => reject(new Error('Failed to load video for compression'));
@@ -409,11 +416,12 @@ export default function Profile() {
 
     try {
       setUploadingVideo(exerciseType);
+      setVideoProgress({ stage: 'Preparing', percent: 0 });
 
       // Auto-compress if over 50MB
       let uploadFile: File = file;
       if (file.size > 50 * 1024 * 1024) {
-        toast.info("Compressing video... this may take a moment.");
+        setVideoProgress({ stage: 'Compressing', percent: 0 });
         uploadFile = await compressVideo(file, duration);
         if (uploadFile.size > 50 * 1024 * 1024) {
           toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
@@ -422,15 +430,30 @@ export default function Profile() {
         toast.success(`Compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(uploadFile.size / 1024 / 1024).toFixed(1)}MB`);
       }
 
+      // Upload phase
+      setVideoProgress({ stage: 'Uploading', percent: 0 });
+
       const fileExt = uploadFile.name.split('.').pop() || 'webm';
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
       const filePath = `pr-videos/${fileName}`;
+
+      // Simulate upload progress (Supabase JS client doesn't expose it)
+      const uploadProgressInterval = setInterval(() => {
+        setVideoProgress(prev => {
+          if (!prev || prev.percent >= 90) return prev;
+          return { stage: 'Uploading', percent: Math.min(prev.percent + 8, 90) };
+        });
+      }, 300);
 
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
         .upload(filePath, uploadFile, { upsert: true });
 
+      clearInterval(uploadProgressInterval);
+
       if (uploadError) throw uploadError;
+
+      setVideoProgress({ stage: 'Finishing', percent: 95 });
 
       const { data: { publicUrl } } = supabase.storage
         .from('pr-videos')
@@ -442,6 +465,7 @@ export default function Profile() {
         videoUrl: publicUrl,
       });
 
+      setVideoProgress({ stage: 'Done', percent: 100 });
       refetchPrVideos();
       toast.success(`PR video uploaded for ${exerciseType}!`);
     } catch (error: any) {
@@ -449,6 +473,7 @@ export default function Profile() {
       console.error(error);
     } finally {
       setUploadingVideo(null);
+      setVideoProgress(null);
     }
   };
 
@@ -706,6 +731,20 @@ export default function Profile() {
                     </button>
                   )}
                 </div>
+                {/* Progress bar */}
+                {uploadingVideo === stat.key && videoProgress && (
+                  <div className="mt-2 w-full">
+                    <div className="w-full bg-muted/30 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-full bg-accent rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${videoProgress.percent}%` }}
+                      />
+                    </div>
+                    <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider mt-1">
+                      {videoProgress.stage} {videoProgress.percent}%
+                    </div>
+                  </div>
+                )}
               </Card>
             );
           })}
