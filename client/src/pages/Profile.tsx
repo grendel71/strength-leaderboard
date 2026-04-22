@@ -28,6 +28,7 @@ export default function Profile() {
   const [newGymCode, setNewGymCode] = useState("");
   const [uploadingVideo, setUploadingVideo] = useState<string | null>(null);
   const [playingVideo, setPlayingVideo] = useState<{ exercise: string; url: string } | null>(null);
+  const [videoProgress, setVideoProgress] = useState<{ stage: string; percent: number } | null>(null);
 
   const { data: allUsers = [], refetch: refetchUsers } = trpc.admin.listUsers.useQuery(undefined, {
     enabled: user?.role === 'admin'
@@ -294,87 +295,13 @@ export default function Profile() {
       setUploading(false);
     }
   };
-
-  // Compress video using Canvas + MediaRecorder
-  const compressVideo = (file: File): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.muted = true;
-      video.playsInline = true;
-      video.src = URL.createObjectURL(file);
-
-      video.onloadedmetadata = () => {
-        // Target 720p max, maintain aspect ratio
-        const maxHeight = 720;
-        let width = video.videoWidth;
-        let height = video.videoHeight;
-        if (height > maxHeight) {
-          width = Math.round(width * (maxHeight / height));
-          height = maxHeight;
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d')!;
-
-        // @ts-ignore - captureStream exists on canvas
-        const stream: MediaStream = canvas.captureStream(30);
-
-        // Try to capture audio from the video
-        try {
-          // @ts-ignore
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioCtx.createMediaElementSource(video);
-          const dest = audioCtx.createMediaStreamDestination();
-          source.connect(dest);
-          source.connect(audioCtx.destination);
-          dest.stream.getAudioTracks().forEach(track => stream.addTrack(track));
-        } catch { /* video might have no audio */ }
-
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-          ? 'video/webm;codecs=vp9'
-          : 'video/webm';
-
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: 2_500_000, // 2.5 Mbps
-        });
-
-        const chunks: Blob[] = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = () => {
-          URL.revokeObjectURL(video.src);
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.webm'), { type: 'video/webm' });
-          resolve(compressed);
-        };
-        recorder.onerror = () => reject(new Error('Compression failed'));
-
-        recorder.start();
-        video.play();
-
-        const drawFrame = () => {
-          if (video.ended || video.paused) {
-            recorder.stop();
-            return;
-          }
-          ctx.drawImage(video, 0, 0, width, height);
-          requestAnimationFrame(drawFrame);
-        };
-
-        video.onplay = drawFrame;
-        video.onended = () => recorder.stop();
-      };
-
-      video.onerror = () => reject(new Error('Failed to load video for compression'));
-    });
-  };
-
   // PR Video upload handler
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>, exerciseType: string) => {
     const file = e.target.files?.[0];
     if (!file || !athleteId) return;
+
+    // Reset the input so same file can be re-selected
+    e.target.value = '';
 
     // Check file type
     if (!file.type.startsWith('video/')) {
@@ -382,10 +309,15 @@ export default function Profile() {
       return;
     }
 
+    // Check file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error(`Video is ${(file.size / 1024 / 1024).toFixed(0)}MB — must be under 50MB. Try trimming or recording at a lower quality.`);
+      return;
+    }
+
     // Check video duration (40s max)
-    let duration = 0;
     try {
-      duration = await new Promise<number>((resolve, reject) => {
+      const duration = await new Promise<number>((resolve, reject) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.onloadedmetadata = () => {
@@ -407,32 +339,31 @@ export default function Profile() {
 
     try {
       setUploadingVideo(exerciseType);
+      setVideoProgress({ stage: 'Uploading', percent: 0 });
 
-      // Auto-compress if over 50MB
-      let uploadFile: File = file;
-      if (file.size > 50 * 1024 * 1024) {
-        toast.info("Compressing video... this may take a moment.");
-        uploadFile = await compressVideo(file);
-        if (uploadFile.size > 50 * 1024 * 1024) {
-          toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
-          return;
-        }
-        toast.success(`Compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(uploadFile.size / 1024 / 1024).toFixed(1)}MB`);
-      }
-
-      const fileExt = uploadFile.name.split('.').pop() || 'webm';
+      const fileExt = file.name.split('.').pop();
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
-      const filePath = `pr-videos/${fileName}`;
+
+      const uploadProgressInterval = setInterval(() => {
+        setVideoProgress((prev: any) => {
+          if (!prev || prev.percent >= 90) return prev;
+          return { stage: 'Uploading', percent: Math.min(prev.percent + 5, 90) };
+        });
+      }, 400);
 
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
-        .upload(filePath, uploadFile, { upsert: true });
+        .upload(fileName, file, { upsert: true });
+
+      clearInterval(uploadProgressInterval);
 
       if (uploadError) throw uploadError;
 
+      setVideoProgress({ stage: 'Saving', percent: 95 });
+
       const { data: { publicUrl } } = supabase.storage
         .from('pr-videos')
-        .getPublicUrl(filePath);
+        .getPublicUrl(fileName);
 
       await upsertPrVideoMutation.mutateAsync({
         athleteId,
@@ -440,6 +371,7 @@ export default function Profile() {
         videoUrl: publicUrl,
       });
 
+      setVideoProgress({ stage: 'Done', percent: 100 });
       refetchPrVideos();
       toast.success(`PR video uploaded for ${exerciseType}!`);
     } catch (error: any) {
@@ -447,6 +379,7 @@ export default function Profile() {
       console.error(error);
     } finally {
       setUploadingVideo(null);
+      setVideoProgress(null);
     }
   };
 
@@ -704,6 +637,22 @@ export default function Profile() {
                     </button>
                   )}
                 </div>
+
+                {/* Progress Bar UI */}
+                {uploadingVideo === stat.key && videoProgress && (
+                  <div className="mt-3 px-2">
+                    <div className="flex justify-between items-center text-[8px] uppercase font-black text-accent mb-1">
+                      <span>{videoProgress.stage}</span>
+                      <span>{videoProgress.percent}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-accent/10 rounded-full overflow-hidden border border-accent/20">
+                      <div
+                        className="h-full bg-accent transition-all duration-300 ease-out shadow-[0_0_8px_rgba(216,180,105,0.5)]"
+                        style={{ width: `${videoProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </Card>
             );
           })}
