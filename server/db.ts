@@ -425,7 +425,6 @@ export async function getPrVideos(athleteId: number) {
 export async function upsertPrVideo(athleteId: number, exerciseType: string, videoUrl: string) {
   const db = await getDb();
   if (!db) return;
-  // Delete existing video for this athlete+exercise, then insert new one
   await db.delete(prVideos).where(and(eq(prVideos.athleteId, athleteId), eq(prVideos.exerciseType, exerciseType)));
   await db.insert(prVideos).values({ athleteId, exerciseType, videoUrl });
 }
@@ -434,4 +433,10 @@ export async function deletePrVideo(athleteId: number, exerciseType: string) {
   const db = await getDb();
   if (!db) return;
   await db.delete(prVideos).where(and(eq(prVideos.athleteId, athleteId), eq(prVideos.exerciseType, exerciseType)));
+}
+
+export async function getPrVideosByExercise(exerciseType: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prVideos).where(eq(prVideos.exerciseType, exerciseType));
 }

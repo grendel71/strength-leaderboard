@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import React, { useState, useEffect } from "react";
 import { Link } from "wouter";
-import { Trophy, LogIn, LogOut, ArrowUpDown, MapPin } from "lucide-react";
+import { Trophy, LogIn, LogOut, ArrowUpDown, MapPin, Play } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -18,6 +18,7 @@ export default function Leaderboard() {
   const [genderFilter, setGenderFilter] = useState<"male" | "female">("male");
   const [selectedGymId, setSelectedGymId] = useState<number | undefined>(undefined);
   const [hasSetInitialGym, setHasSetInitialGym] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState<{ name: string; url: string } | null>(null);
 
   const { data: gyms = [] } = trpc.gym.getAll.useQuery();
   const { data: athletes = [], isLoading } = trpc.leaderboard.getByExercise.useQuery({
@@ -25,6 +26,13 @@ export default function Leaderboard() {
     gymId: selectedGymId,
     gender: genderFilter,
   });
+
+  // Fetch PR videos for the currently selected exercise
+  const { data: exerciseVideos = [] } = trpc.athlete.getPrVideosByExercise.useQuery(
+    { exerciseType: sortBy },
+    { enabled: isAuthenticated }
+  );
+  const videoMap = new Map<number, string>(exerciseVideos.map((v: any) => [v.athleteId, v.videoUrl]));
 
   const { data: athlete } = trpc.athlete.getById.useQuery(
     { id: (user as any)?.athleteId || 0 },
@@ -270,6 +278,16 @@ export default function Leaderboard() {
                         {athlete.total || "—"}
                       </div>
                     </div>
+
+                    {/* PR Video button */}
+                    {isAuthenticated && videoMap.has(athlete.id) && (
+                      <button
+                        onClick={() => setPlayingVideo({ name: athlete.name, url: videoMap.get(athlete.id)! })}
+                        className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 bg-accent/10 hover:bg-accent/20 rounded text-xs text-accent font-bold uppercase tracking-wider transition-all active:scale-95"
+                      >
+                        <Play className="w-3.5 h-3.5" /> Watch {exercises.find(e => e.id === sortBy)?.label} PR
+                      </button>
+                    )}
                   </Card>
                 ))}
               </div>
@@ -430,15 +448,25 @@ export default function Leaderboard() {
                             {athlete.total || "—"}
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <Link href={`/athlete/${athlete.id}`}>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-[10px] uppercase font-black hover:bg-accent hover:text-black transition-all"
-                              >
-                                View
-                              </Button>
-                            </Link>
+                            <div className="flex items-center justify-end gap-2">
+                              {isAuthenticated && videoMap.has(athlete.id) && (
+                                <button
+                                  onClick={() => setPlayingVideo({ name: athlete.name, url: videoMap.get(athlete.id)! })}
+                                  className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 rounded text-[10px] text-accent font-bold uppercase tracking-wider transition-all"
+                                >
+                                  <Play className="w-3 h-3" /> PR
+                                </button>
+                              )}
+                              <Link href={`/athlete/${athlete.id}`}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-[10px] uppercase font-black hover:bg-accent hover:text-black transition-all"
+                                >
+                                  View
+                                </Button>
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -470,6 +498,24 @@ export default function Leaderboard() {
           </Card>
         </div>
       </div>
+
+    {/* Video Playback Dialog */}
+    <Dialog open={!!playingVideo} onOpenChange={(open) => !open && setPlayingVideo(null)}>
+      <DialogContent className="sm:max-w-2xl bg-black border-accent/30 p-3 sm:p-6">
+        <DialogTitle className="text-accent uppercase font-black tracking-widest text-xs sm:text-sm">
+          {playingVideo?.name} — {exercises.find(e => e.id === sortBy)?.label} PR
+        </DialogTitle>
+        {playingVideo && (
+          <video
+            src={playingVideo.url}
+            controls
+            autoPlay
+            playsInline
+            className="w-full rounded-lg max-h-[70vh]"
+          />
+        )}
+      </DialogContent>
+    </Dialog>
     </div>
   );
 }

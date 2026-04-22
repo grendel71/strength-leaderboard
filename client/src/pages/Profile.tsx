@@ -28,7 +28,6 @@ export default function Profile() {
   const [newGymCode, setNewGymCode] = useState("");
   const [uploadingVideo, setUploadingVideo] = useState<string | null>(null);
   const [playingVideo, setPlayingVideo] = useState<{ exercise: string; url: string } | null>(null);
-  const [videoProgress, setVideoProgress] = useState<{ stage: string; percent: number } | null>(null);
 
   const { data: allUsers = [], refetch: refetchUsers } = trpc.admin.listUsers.useQuery(undefined, {
     enabled: user?.role === 'admin'
@@ -296,6 +295,82 @@ export default function Profile() {
     }
   };
 
+  // Compress video using Canvas + MediaRecorder
+  const compressVideo = (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.src = URL.createObjectURL(file);
+
+      video.onloadedmetadata = () => {
+        // Target 720p max, maintain aspect ratio
+        const maxHeight = 720;
+        let width = video.videoWidth;
+        let height = video.videoHeight;
+        if (height > maxHeight) {
+          width = Math.round(width * (maxHeight / height));
+          height = maxHeight;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+
+        // @ts-ignore - captureStream exists on canvas
+        const stream: MediaStream = canvas.captureStream(30);
+
+        // Try to capture audio from the video
+        try {
+          // @ts-ignore
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const source = audioCtx.createMediaElementSource(video);
+          const dest = audioCtx.createMediaStreamDestination();
+          source.connect(dest);
+          source.connect(audioCtx.destination);
+          dest.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+        } catch { /* video might have no audio */ }
+
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : 'video/webm';
+
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 2_500_000, // 2.5 Mbps
+        });
+
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          URL.revokeObjectURL(video.src);
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.webm'), { type: 'video/webm' });
+          resolve(compressed);
+        };
+        recorder.onerror = () => reject(new Error('Compression failed'));
+
+        recorder.start();
+        video.play();
+
+        const drawFrame = () => {
+          if (video.ended || video.paused) {
+            recorder.stop();
+            return;
+          }
+          ctx.drawImage(video, 0, 0, width, height);
+          requestAnimationFrame(drawFrame);
+        };
+
+        video.onplay = drawFrame;
+        video.onended = () => recorder.stop();
+      };
+
+      video.onerror = () => reject(new Error('Failed to load video for compression'));
+    });
+  };
+
   // PR Video upload handler
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>, exerciseType: string) => {
     const file = e.target.files?.[0];
@@ -307,15 +382,10 @@ export default function Profile() {
       return;
     }
 
-    // Check file size (50MB max — Supabase limit)
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error(`Video is ${(file.size / 1024 / 1024).toFixed(0)}MB — must be under 50MB. Try trimming or recording at a lower quality.`);
-      return;
-    }
-
     // Check video duration (40s max)
+    let duration = 0;
     try {
-      const duration = await new Promise<number>((resolve, reject) => {
+      duration = await new Promise<number>((resolve, reject) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.onloadedmetadata = () => {
@@ -337,29 +407,28 @@ export default function Profile() {
 
     try {
       setUploadingVideo(exerciseType);
-      setVideoProgress({ stage: 'Uploading', percent: 0 });
 
-      const fileExt = file.name.split('.').pop();
+      // Auto-compress if over 50MB
+      let uploadFile: File = file;
+      if (file.size > 50 * 1024 * 1024) {
+        toast.info("Compressing video... this may take a moment.");
+        uploadFile = await compressVideo(file);
+        if (uploadFile.size > 50 * 1024 * 1024) {
+          toast.error("Video is still too large after compression. Try a shorter or lower-quality video.");
+          return;
+        }
+        toast.success(`Compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(uploadFile.size / 1024 / 1024).toFixed(1)}MB`);
+      }
+
+      const fileExt = uploadFile.name.split('.').pop() || 'webm';
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
       const filePath = `pr-videos/${fileName}`;
 
-      // Simulate upload progress
-      const uploadProgressInterval = setInterval(() => {
-        setVideoProgress(prev => {
-          if (!prev || prev.percent >= 90) return prev;
-          return { stage: 'Uploading', percent: Math.min(prev.percent + 5, 90) };
-        });
-      }, 400);
-
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
-        .upload(filePath, file, { upsert: true });
-
-      clearInterval(uploadProgressInterval);
+        .upload(filePath, uploadFile, { upsert: true });
 
       if (uploadError) throw uploadError;
-
-      setVideoProgress({ stage: 'Saving', percent: 95 });
 
       const { data: { publicUrl } } = supabase.storage
         .from('pr-videos')
@@ -371,7 +440,6 @@ export default function Profile() {
         videoUrl: publicUrl,
       });
 
-      setVideoProgress({ stage: 'Done', percent: 100 });
       refetchPrVideos();
       toast.success(`PR video uploaded for ${exerciseType}!`);
     } catch (error: any) {
@@ -379,7 +447,6 @@ export default function Profile() {
       console.error(error);
     } finally {
       setUploadingVideo(null);
-      setVideoProgress(null);
     }
   };
 
@@ -594,7 +661,7 @@ export default function Profile() {
             { label: "OHP", value: athlete.ohp, key: "ohp" },
             { label: "Total", value: athlete.total, key: "total" },
           ].map((stat) => {
-            const video = prVideos.find(v => v.exerciseType === stat.key);
+            const video = prVideos.find((v: any) => v.exerciseType === stat.key);
             const isOwner = user?.athleteId === athleteId;
             return (
               <Card key={stat.label} className="card-dramatic p-4 text-center border-accent/20 relative group">
@@ -637,20 +704,6 @@ export default function Profile() {
                     </button>
                   )}
                 </div>
-                {/* Progress bar */}
-                {uploadingVideo === stat.key && videoProgress && (
-                  <div className="mt-2 w-full">
-                    <div className="w-full bg-muted/30 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className="h-full bg-accent rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${videoProgress.percent}%` }}
-                      />
-                    </div>
-                    <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider mt-1">
-                      {videoProgress.stage} {videoProgress.percent}%
-                    </div>
-                  </div>
-                )}
               </Card>
             );
           })}
@@ -762,8 +815,8 @@ export default function Profile() {
                       type="button"
                       onClick={() => setFormData({ ...formData, gender: "male" })}
                       className={`flex-1 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "male"
-                          ? "bg-accent text-black shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
+                        ? "bg-accent text-black shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                         }`}
                     >
                       🏋️ Male
@@ -772,8 +825,8 @@ export default function Profile() {
                       type="button"
                       onClick={() => setFormData({ ...formData, gender: "female" })}
                       className={`flex-1 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${formData.gender === "female"
-                          ? "bg-accent text-black shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
+                        ? "bg-accent text-black shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                         }`}
                     >
                       💪 Female
