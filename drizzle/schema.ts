@@ -196,3 +196,22 @@ export const prVideoComments = pgTable("prVideoComments", {
 
 export type PrVideoComment = typeof prVideoComments.$inferSelect;
 export type InsertPrVideoComment = typeof prVideoComments.$inferInsert;
+
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  type: varchar("type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  message: text("message").notNull(),
+  athleteId: integer("athleteId"),
+  exerciseType: varchar("exerciseType", { length: 50 }),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("notifications_user_idx").on(table.userId),
+  unreadIdx: index("notifications_unread_idx").on(table.userId, table.readAt),
+  createdAtIdx: index("notifications_created_idx").on(table.createdAt),
+}));
+
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;

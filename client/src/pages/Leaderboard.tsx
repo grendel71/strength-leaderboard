@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "wouter";
-import { Trophy, LogIn, LogOut, ArrowUpDown, MapPin, Play } from "lucide-react";
+import { Trophy, LogIn, LogOut, ArrowUpDown, MapPin, Play, Bell } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -47,6 +47,7 @@ export default function Leaderboard() {
   const [hasSetInitialGym, setHasSetInitialGym] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<{ athleteId: number; name: string; url: string; exercise: string } | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
+  const [showNotifications, setShowNotifications] = useState(false);
   const genderFilter = leaderboardView === "female" ? "female" : "male";
 
   const { data: gyms = [] } = trpc.gym.getAll.useQuery();
@@ -75,6 +76,9 @@ export default function Leaderboard() {
 
   const { data: allJudgments = [], refetch: refetchJudgments } = trpc.athlete.getAllPrVideoJudgments.useQuery();
   const { data: allComments = [], refetch: refetchComments } = trpc.athlete.getAllPrVideoComments.useQuery();
+  const { data: notifications = [], refetch: refetchNotifications } = trpc.notifications.getMine.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const submitVoteMutation = trpc.athlete.submitPrVideoVote.useMutation({
     onSuccess: () => {
       refetchJudgments();
@@ -86,6 +90,10 @@ export default function Leaderboard() {
       refetchComments();
     },
   });
+  const markAllNotificationsReadMutation = trpc.notifications.markAllRead.useMutation({
+    onSuccess: () => refetchNotifications(),
+  });
+  const unreadNotifications = notifications.filter((notification) => !notification.readAt);
 
   useEffect(() => {
     if (athlete && !hasSetInitialGym) {
@@ -151,6 +159,20 @@ export default function Leaderboard() {
       exerciseType: playingVideo.exercise,
       comment,
     });
+  };
+  const openNotification = (notification: (typeof notifications)[number]) => {
+    if (notification.athleteId && notification.exerciseType) {
+      const video = allPrVideos.find(
+        (prVideo: PrVideo) =>
+          prVideo.athleteId === notification.athleteId &&
+          prVideo.exerciseType === notification.exerciseType
+      );
+
+      if (video) {
+        openVideo(notification.athleteId, athlete?.name || "Your PR Video", video);
+        setShowNotifications(false);
+      }
+    }
   };
   const renderJudgmentStatus = (athleteId: number, exerciseType: string, variant: "mobile" | "desktop") => {
     const videoJudgments = getVideoJudgments(athleteId, exerciseType);
@@ -290,6 +312,24 @@ export default function Leaderboard() {
               <div className="flex gap-2 sm:gap-3 flex-1 sm:flex-initial">
                 {loading ? null : isAuthenticated ? (
                   <>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowNotifications(true);
+                        if (unreadNotifications.length > 0) {
+                          markAllNotificationsReadMutation.mutate();
+                        }
+                      }}
+                      className="relative uppercase font-bold h-11 md:h-10 px-3 sm:px-4"
+                    >
+                      <Bell className="w-4 h-4 sm:mr-2" />
+                      <span className="hidden sm:inline">Alerts</span>
+                      {unreadNotifications.length > 0 && (
+                        <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center">
+                          {unreadNotifications.length}
+                        </span>
+                      )}
+                    </Button>
                     <Link href="/profile" className="flex-1 sm:flex-initial">
                       <Button className="btn-dramatic w-full h-11 md:h-10">
                         My Profile
@@ -747,6 +787,40 @@ export default function Leaderboard() {
           </>
         )}
       </div>
+
+    <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
+      <DialogContent className="sm:max-w-lg bg-black border-accent/30 p-4 sm:p-6">
+        <DialogTitle className="text-accent uppercase font-black tracking-widest text-xs sm:text-sm mb-4">
+          Notifications
+        </DialogTitle>
+        {notifications.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No notifications yet.</p>
+        ) : (
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            {notifications.map((notification) => (
+              <button
+                key={notification.id}
+                onClick={() => openNotification(notification)}
+                className="w-full text-left rounded-lg border border-accent/10 bg-card/60 hover:bg-accent/10 p-3 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <span className="text-sm font-black uppercase text-foreground">
+                    {notification.title}
+                  </span>
+                  {!notification.readAt && (
+                    <span className="mt-1 h-2 w-2 rounded-full bg-red-500 shrink-0" />
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{notification.message}</p>
+                <p className="text-[10px] text-accent uppercase font-bold mt-2">
+                  {formatUploadTime(notification.createdAt)}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
 
     {/* Video Playback & Judging Dialog */}
     <Dialog open={!!playingVideo} onOpenChange={(open) => {

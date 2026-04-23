@@ -2,7 +2,7 @@ import { eq, and, desc, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pkg from 'pg';
 const { Pool } = pkg;
-import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos, prVideoJudgments, prVideoComments } from "../drizzle/schema";
+import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos, prVideoJudgments, prVideoComments, notifications } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
@@ -104,6 +104,14 @@ export async function getUserById(id: number) {
 
   const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
 
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserByAthleteId(athleteId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(users).where(eq(users.athleteId, athleteId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
@@ -597,4 +605,44 @@ export async function addPrVideoComment(athleteId: number, exerciseType: string,
     userId,
     comment,
   });
+
+  const owner = await getUserByAthleteId(athleteId);
+  if (!owner || owner.id === userId) return;
+
+  const commenter = await getUserById(userId);
+  const commenterName = commenter?.name || commenter?.email || "Someone";
+
+  await db.insert(notifications).values({
+    userId: owner.id,
+    type: "pr_video_comment",
+    title: "New PR video comment",
+    message: `${commenterName} commented on your ${exerciseType} PR video.`,
+    athleteId,
+    exerciseType,
+  });
+}
+
+export async function getNotificationsForUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt));
+}
+
+export async function markNotificationRead(userId: number, notificationId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+}
+
+export async function markAllNotificationsRead(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(notifications)
+    .set({ readAt: new Date() })
+    .where(eq(notifications.userId, userId));
 }

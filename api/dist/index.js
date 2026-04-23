@@ -25179,6 +25179,21 @@ var prVideoComments = pgTable("prVideoComments", {
   userIdx: index("prVideoComments_user_idx").on(table.userId),
   createdAtIdx: index("prVideoComments_created_idx").on(table.createdAt)
 }));
+var notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer2("userId").notNull(),
+  type: varchar("type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  message: text("message").notNull(),
+  athleteId: integer2("athleteId"),
+  exerciseType: varchar("exerciseType", { length: 50 }),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+}, (table) => ({
+  userIdx: index("notifications_user_idx").on(table.userId),
+  unreadIdx: index("notifications_unread_idx").on(table.userId, table.readAt),
+  createdAtIdx: index("notifications_created_idx").on(table.createdAt)
+}));
 
 // server/db.ts
 var { Pool: Pool2 } = pkg;
@@ -25264,6 +25279,12 @@ async function getUserById(id) {
     return void 0;
   }
   const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result.length > 0 ? result[0] : void 0;
+}
+async function getUserByAthleteId(athleteId) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const result = await db.select().from(users).where(eq(users.athleteId, athleteId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 async function getAllAthletes() {
@@ -25638,6 +25659,33 @@ async function addPrVideoComment(athleteId, exerciseType, userId, comment) {
     userId,
     comment
   });
+  const owner = await getUserByAthleteId(athleteId);
+  if (!owner || owner.id === userId) return;
+  const commenter = await getUserById(userId);
+  const commenterName = commenter?.name || commenter?.email || "Someone";
+  await db.insert(notifications).values({
+    userId: owner.id,
+    type: "pr_video_comment",
+    title: "New PR video comment",
+    message: `${commenterName} commented on your ${exerciseType} PR video.`,
+    athleteId,
+    exerciseType
+  });
+}
+async function getNotificationsForUser(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt));
+}
+async function markNotificationRead(userId, notificationId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+}
+async function markAllNotificationsRead(userId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(eq(notifications.userId, userId));
 }
 
 // server/routers.ts
@@ -25655,6 +25703,11 @@ var appRouter = router({
         success: true
       };
     })
+  }),
+  notifications: router({
+    getMine: protectedProcedure.query(({ ctx }) => getNotificationsForUser(ctx.user.id)),
+    markRead: protectedProcedure.input(external_exports.object({ id: external_exports.number() })).mutation(({ input, ctx }) => markNotificationRead(ctx.user.id, input.id)),
+    markAllRead: protectedProcedure.mutation(({ ctx }) => markAllNotificationsRead(ctx.user.id))
   }),
   leaderboard: router({
     getAll: publicProcedure.query(() => getAllAthletes()),

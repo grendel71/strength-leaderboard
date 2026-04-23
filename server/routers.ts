@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord } from "../drizzle/schema";
-import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos, getRecentPrVideos, getPrVideoJudgments, getAllPrVideoJudgments, assignPrVideoJudges, submitPrVideoVote, getAllPrVideoComments, addPrVideoComment } from "./db";
+import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos, getRecentPrVideos, getPrVideoJudgments, getAllPrVideoJudgments, assignPrVideoJudges, submitPrVideoVote, getAllPrVideoComments, addPrVideoComment, getNotificationsForUser, markNotificationRead, markAllNotificationsRead } from "./db";
 
 export const appRouter = router({
   system: router({
@@ -19,6 +19,14 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+  }),
+
+  notifications: router({
+    getMine: protectedProcedure.query(({ ctx }) => getNotificationsForUser(ctx.user.id)),
+    markRead: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input, ctx }) => markNotificationRead(ctx.user.id, input.id)),
+    markAllRead: protectedProcedure.mutation(({ ctx }) => markAllNotificationsRead(ctx.user.id)),
   }),
 
   leaderboard: router({
