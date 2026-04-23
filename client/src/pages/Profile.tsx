@@ -25,6 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 
 const MAX_PR_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
+const TARGET_PR_VIDEO_UPLOAD_BYTES = 45 * 1024 * 1024;
 const MAX_PR_VIDEO_DURATION_SECONDS = 40;
 const VIDEO_COMPRESSION_PRESETS = [
   { maxWidth: 1280, videoBitsPerSecond: 2_500_000 },
@@ -203,13 +204,13 @@ const optimizeVideoForUpload = async (
     if (!smallestFile || optimizedFile.size < smallestFile.size) {
       smallestFile = optimizedFile;
     }
-    if (optimizedFile.size <= MAX_PR_VIDEO_SIZE_BYTES) {
+    if (optimizedFile.size <= TARGET_PR_VIDEO_UPLOAD_BYTES) {
       return optimizedFile;
     }
   }
 
   throw new Error(
-    `Could not automatically reduce this video below 50MB. Best result was ${smallestFile ? formatFileSize(smallestFile.size) : "too large"}.`
+    `Could not automatically reduce this video below ${formatFileSize(TARGET_PR_VIDEO_UPLOAD_BYTES)}. Best result was ${smallestFile ? formatFileSize(smallestFile.size) : "too large"}.`
   );
 };
 
@@ -426,6 +427,7 @@ export default function Profile() {
       refetchAthlete();
     } catch (error) {
       console.error("Failed to add lift:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add lift.");
     }
   };
 
@@ -556,7 +558,7 @@ export default function Profile() {
 
       const metadata = await getVideoMetadata(file);
       const needsOptimization =
-        file.size > MAX_PR_VIDEO_SIZE_BYTES || metadata.duration > MAX_PR_VIDEO_DURATION_SECONDS;
+        file.size > TARGET_PR_VIDEO_UPLOAD_BYTES || metadata.duration > MAX_PR_VIDEO_DURATION_SECONDS;
       let uploadFile = file;
 
       if (needsOptimization) {
@@ -584,9 +586,21 @@ export default function Profile() {
         });
       }, 400);
 
-      const { error: uploadError } = await supabase.storage
-        .from('pr-videos')
-        .upload(fileName, uploadFile, { upsert: true });
+      let uploadError: unknown = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const { error } = await supabase.storage
+          .from('pr-videos')
+          .upload(fileName, uploadFile, { upsert: true });
+
+        uploadError = error;
+        if (!uploadError) break;
+
+        const message = uploadError instanceof Error ? uploadError.message : String(uploadError);
+        if (!message.toLowerCase().includes('fetch') || attempt === 2) break;
+
+        setVideoProgress({ stage: 'Retrying upload', percent: 10 });
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
+      }
 
       clearInterval(uploadProgressInterval);
 
