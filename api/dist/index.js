@@ -25515,6 +25515,19 @@ async function getAllPrVideos() {
   if (!db) return [];
   return db.select().from(prVideos);
 }
+async function getRecentPrVideos(limit = 8) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: prVideos.id,
+    athleteId: prVideos.athleteId,
+    athleteName: athletes.name,
+    avatarUrl: athletes.avatarUrl,
+    exerciseType: prVideos.exerciseType,
+    videoUrl: prVideos.videoUrl,
+    createdAt: prVideos.createdAt
+  }).from(prVideos).innerJoin(athletes, eq(prVideos.athleteId, athletes.id)).orderBy(desc(prVideos.createdAt)).limit(limit);
+}
 async function getPrVideoJudgments(athleteId, exerciseType) {
   const db = await getDb();
   if (!db) return [];
@@ -25877,6 +25890,7 @@ var appRouter = router({
     getPrVideos: publicProcedure.input(external_exports.object({ athleteId: external_exports.number() })).query(({ input }) => getPrVideos(input.athleteId)),
     getPrVideosByExercise: publicProcedure.input(external_exports.object({ exerciseType: external_exports.string() })).query(({ input }) => getPrVideosByExercise(input.exerciseType)),
     getAllPrVideos: publicProcedure.query(() => getAllPrVideos()),
+    getRecentPrVideos: publicProcedure.input(external_exports.object({ limit: external_exports.number().int().min(1).max(20).optional() }).optional()).query(({ input }) => getRecentPrVideos(input?.limit ?? 8)),
     getPrVideoJudgments: publicProcedure.input(external_exports.object({ athleteId: external_exports.number(), exerciseType: external_exports.string() })).query(({ input }) => getPrVideoJudgments(input.athleteId, input.exerciseType)),
     getAllPrVideoJudgments: publicProcedure.query(() => getAllPrVideoJudgments()),
     assignPrVideoJudges: protectedProcedure.input(external_exports.object({

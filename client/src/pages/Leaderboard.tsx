@@ -29,6 +29,13 @@ type PrVideo = {
   videoUrl: string;
 };
 
+type RecentPrVideo = PrVideo & {
+  id: number;
+  athleteName: string;
+  avatarUrl: string | null;
+  createdAt: Date | string;
+};
+
 export default function Leaderboard() {
   const { user, isAuthenticated, logout, loading } = useAuth();
   const [sortBy, setSortBy] = useState<ExerciseId>("total");
@@ -46,6 +53,7 @@ export default function Leaderboard() {
 
   // Fetch ALL PR videos for the leaderboard
   const { data: allPrVideos = [] } = trpc.athlete.getAllPrVideos.useQuery();
+  const { data: recentPrVideos = [] } = trpc.athlete.getRecentPrVideos.useQuery({ limit: 8 });
   const athleteVideoMap = useMemo(() => {
     const map = new Map<number, PrVideo[]>();
     allPrVideos.forEach((video: PrVideo) => {
@@ -97,6 +105,20 @@ export default function Leaderboard() {
     );
   const getVideoJudgments = (athleteId: number, exerciseType: string) =>
     allJudgments.filter((judgment) => judgment.athleteId === athleteId && judgment.exerciseType === exerciseType);
+  const formatUploadTime = (createdAt: Date | string) => {
+    const uploadTime = new Date(createdAt).getTime();
+    const diffSeconds = Math.max(1, Math.floor((Date.now() - uploadTime) / 1000));
+    if (diffSeconds < 60) return "Just now";
+
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+
+    const diffDays = Math.floor(diffHours / 24);
+    return diffDays < 7 ? `${diffDays}d ago` : new Date(createdAt).toLocaleDateString();
+  };
   const openVideo = (athleteId: number, athleteName: string, video: PrVideo) => {
     setPlayingVideo({
       athleteId,
@@ -260,6 +282,72 @@ export default function Leaderboard() {
 
       {/* Main content */}
       <div className="container py-12">
+        {recentPrVideos.length > 0 && (
+          <section className="mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-accent mb-1">
+                  Fresh Uploads
+                </p>
+                <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+                  Recent PR Feed
+                </h2>
+              </div>
+              <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">
+                New lift videos from the community
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {recentPrVideos.map((video: RecentPrVideo) => (
+                <Card
+                  key={video.id}
+                  className="group relative overflow-hidden border-accent/15 bg-card/80 p-4 hover:border-accent/40 transition-all"
+                >
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent/10 via-accent to-accent/10 opacity-70" />
+                  <div className="flex items-center gap-3 mb-4">
+                    <Link href={`/athlete/${video.athleteId}`}>
+                      <Avatar className="w-10 h-10 border border-accent/25 cursor-pointer group-hover:scale-105 transition-transform">
+                        <AvatarImage src={video.avatarUrl || ""} className="object-cover" />
+                        <AvatarFallback className="bg-muted text-xs font-black">
+                          {video.athleteName.charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Link>
+                    <div className="min-w-0">
+                      <Link href={`/athlete/${video.athleteId}`}>
+                        <h3 className="font-black text-sm uppercase truncate hover:text-accent transition-colors">
+                          {video.athleteName}
+                        </h3>
+                      </Link>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">
+                        {formatUploadTime(video.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] text-muted-foreground uppercase font-bold">Uploaded</div>
+                      <div className="text-lg font-black text-accent uppercase">
+                        {getExerciseLabel(video.exerciseType)} PR
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => openVideo(video.athleteId, video.athleteName, video)}
+                      size="sm"
+                      className="bg-accent text-black hover:bg-accent/90 font-black uppercase"
+                    >
+                      <Play className="w-3.5 h-3.5 mr-1" />
+                      Watch
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Exercise tabs */}
         <div className="mb-8">
           <Tabs value={sortBy} onValueChange={(v) => setSortBy(v as any)} className="w-full">

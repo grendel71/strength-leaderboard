@@ -448,6 +448,26 @@ export async function getAllPrVideos() {
   return db.select().from(prVideos);
 }
 
+export async function getRecentPrVideos(limit: number = 8) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db
+    .select({
+      id: prVideos.id,
+      athleteId: prVideos.athleteId,
+      athleteName: athletes.name,
+      avatarUrl: athletes.avatarUrl,
+      exerciseType: prVideos.exerciseType,
+      videoUrl: prVideos.videoUrl,
+      createdAt: prVideos.createdAt,
+    })
+    .from(prVideos)
+    .innerJoin(athletes, eq(prVideos.athleteId, athletes.id))
+    .orderBy(desc(prVideos.createdAt))
+    .limit(limit);
+}
+
 // PR Video Judgments
 export async function getPrVideoJudgments(athleteId: number, exerciseType: string) {
   const db = await getDb();
