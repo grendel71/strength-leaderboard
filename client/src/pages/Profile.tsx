@@ -620,6 +620,7 @@ export default function Profile() {
 
       setVideoProgress({ stage: 'Done', percent: 100 });
       refetchPrVideos();
+      refetchJudgments();
       toast.success(`PR video uploaded for ${exerciseType}!`);
     } catch (error: any) {
       toast.error(error.message || "Failed to upload video.");

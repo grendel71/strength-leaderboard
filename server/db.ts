@@ -427,6 +427,7 @@ export async function upsertPrVideo(athleteId: number, exerciseType: string, vid
   if (!db) return;
   await db.delete(prVideos).where(and(eq(prVideos.athleteId, athleteId), eq(prVideos.exerciseType, exerciseType)));
   await db.insert(prVideos).values({ athleteId, exerciseType, videoUrl });
+  await assignLatestPrVideoJudgesIfMissing(athleteId, exerciseType);
 }
 
 export async function deletePrVideo(athleteId: number, exerciseType: string) {
@@ -463,6 +464,47 @@ export async function getAllPrVideoJudgments() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(prVideoJudgments);
+}
+
+async function getLatestPrVideoJudgeIds(athleteId: number, excludeExerciseType: string) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db.select().from(prVideoJudgments).where(
+    eq(prVideoJudgments.athleteId, athleteId)
+  );
+
+  const assignments = new Map<string, { latestTime: number; judgeIds: number[] }>();
+  rows.forEach((row) => {
+    if (row.exerciseType === excludeExerciseType) return;
+
+    const latestTime = row.createdAt?.getTime?.() ?? 0;
+    const assignment = assignments.get(row.exerciseType);
+    if (!assignment) {
+      assignments.set(row.exerciseType, { latestTime, judgeIds: [row.judgeId] });
+      return;
+    }
+
+    assignment.latestTime = Math.max(assignment.latestTime, latestTime);
+    if (!assignment.judgeIds.includes(row.judgeId)) {
+      assignment.judgeIds.push(row.judgeId);
+    }
+  });
+
+  return Array.from(assignments.values())
+    .sort((left, right) => right.latestTime - left.latestTime)
+    .find((assignment) => assignment.judgeIds.length > 0)?.judgeIds ?? [];
+}
+
+export async function assignLatestPrVideoJudgesIfMissing(athleteId: number, exerciseType: string) {
+  const existingJudges = await getPrVideoJudgments(athleteId, exerciseType);
+  if (existingJudges.length > 0) return [];
+
+  const judgeIds = await getLatestPrVideoJudgeIds(athleteId, exerciseType);
+  if (judgeIds.length === 0) return [];
+
+  await assignPrVideoJudges(athleteId, exerciseType, judgeIds);
+  return judgeIds;
 }
 
 export async function assignPrVideoJudges(athleteId: number, exerciseType: string, judgeIds: number[]) {
