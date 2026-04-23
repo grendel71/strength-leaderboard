@@ -24,6 +24,195 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 
+const MAX_PR_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_PR_VIDEO_DURATION_SECONDS = 40;
+const VIDEO_COMPRESSION_PRESETS = [
+  { maxWidth: 1280, videoBitsPerSecond: 2_500_000 },
+  { maxWidth: 960, videoBitsPerSecond: 1_500_000 },
+  { maxWidth: 720, videoBitsPerSecond: 900_000 },
+];
+
+type VideoMetadata = {
+  duration: number;
+  width: number;
+  height: number;
+};
+
+const formatFileSize = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)}MB`;
+
+const getSupportedRecordingMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return "";
+
+  return [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || "";
+};
+
+const getVideoMetadata = (file: File) =>
+  new Promise<VideoMetadata>((resolve, reject) => {
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    const cleanup = () => URL.revokeObjectURL(objectUrl);
+
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.onloadedmetadata = () => {
+      cleanup();
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        reject(new Error("Could not read video duration."));
+        return;
+      }
+      resolve({
+        duration: video.duration,
+        width: video.videoWidth || 720,
+        height: video.videoHeight || 1280,
+      });
+    };
+    video.onerror = () => {
+      cleanup();
+      reject(new Error("Could not read video metadata."));
+    };
+    video.src = objectUrl;
+  });
+
+const getCompressedFileName = (fileName: string, mimeType: string) => {
+  const baseName = fileName.replace(/\.[^/.]+$/, "") || "pr-video";
+  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+  return `${baseName}-optimized.${extension}`;
+};
+
+const recordOptimizedVideo = (
+  file: File,
+  metadata: VideoMetadata,
+  preset: (typeof VIDEO_COMPRESSION_PRESETS)[number],
+  onProgress: (percent: number) => void
+) =>
+  new Promise<File>((resolve, reject) => {
+    const mimeType = getSupportedRecordingMimeType();
+    if (!mimeType || typeof MediaRecorder === "undefined") {
+      reject(new Error("Automatic video compression is not supported in this browser."));
+      return;
+    }
+
+    const sourceUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context || typeof canvas.captureStream !== "function") {
+      URL.revokeObjectURL(sourceUrl);
+      reject(new Error("Automatic video compression is not supported in this browser."));
+      return;
+    }
+
+    const scale = Math.min(1, preset.maxWidth / metadata.width);
+    const targetWidth = Math.max(2, Math.round((metadata.width * scale) / 2) * 2);
+    const targetHeight = Math.max(2, Math.round((metadata.height * scale) / 2) * 2);
+    const recordDuration = Math.min(metadata.duration, MAX_PR_VIDEO_DURATION_SECONDS);
+    const chunks: BlobPart[] = [];
+    let recorder: MediaRecorder | null = null;
+    let animationFrame = 0;
+    let stopTimer: number | undefined;
+    let settled = false;
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const cleanup = () => {
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      if (stopTimer) window.clearTimeout(stopTimer);
+      video.pause();
+      recorder?.stream.getTracks().forEach((track) => track.stop());
+      URL.revokeObjectURL(sourceUrl);
+    };
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const drawFrame = () => {
+      context.drawImage(video, 0, 0, targetWidth, targetHeight);
+      const percent = Math.min(85, Math.max(5, Math.round((video.currentTime / recordDuration) * 85)));
+      onProgress(percent);
+
+      if (!video.paused && !video.ended && video.currentTime < recordDuration) {
+        animationFrame = requestAnimationFrame(drawFrame);
+      }
+    };
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onloadedmetadata = async () => {
+      try {
+        const stream = canvas.captureStream(24);
+        const videoWithCapture = video as HTMLVideoElement & {
+          captureStream?: () => MediaStream;
+          mozCaptureStream?: () => MediaStream;
+        };
+        const sourceStream = videoWithCapture.captureStream?.() || videoWithCapture.mozCaptureStream?.();
+        sourceStream?.getAudioTracks().forEach((track) => stream.addTrack(track));
+
+        recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: preset.videoBitsPerSecond,
+          audioBitsPerSecond: 96_000,
+        });
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onerror = () => fail(new Error("Video compression failed."));
+        recorder.onstop = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const blob = new Blob(chunks, { type: mimeType });
+          resolve(new File([blob], getCompressedFileName(file.name, mimeType), { type: blob.type || mimeType }));
+        };
+
+        recorder.start(1000);
+        await video.play();
+        drawFrame();
+
+        stopTimer = window.setTimeout(() => {
+          if (recorder?.state === "recording") recorder.stop();
+        }, Math.ceil(recordDuration * 1000) + 250);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error("Video compression failed."));
+      }
+    };
+    video.onerror = () => fail(new Error("Could not load video for compression."));
+    video.src = sourceUrl;
+  });
+
+const optimizeVideoForUpload = async (
+  file: File,
+  metadata: VideoMetadata,
+  onProgress: (percent: number) => void
+) => {
+  let smallestFile: File | null = null;
+
+  for (const preset of VIDEO_COMPRESSION_PRESETS) {
+    const optimizedFile = await recordOptimizedVideo(file, metadata, preset, onProgress);
+    if (!smallestFile || optimizedFile.size < smallestFile.size) {
+      smallestFile = optimizedFile;
+    }
+    if (optimizedFile.size <= MAX_PR_VIDEO_SIZE_BYTES) {
+      return optimizedFile;
+    }
+  }
+
+  throw new Error(
+    `Could not automatically reduce this video below 50MB. Best result was ${smallestFile ? formatFileSize(smallestFile.size) : "too large"}.`
+  );
+};
+
 export default function Profile() {
   const [, navigate] = useLocation();
   const { user, isAuthenticated } = useAuth();
@@ -361,39 +550,31 @@ export default function Profile() {
       return;
     }
 
-    // Check file size (50MB max)
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error(`Video is ${(file.size / 1024 / 1024).toFixed(0)}MB — must be under 50MB. Try trimming or recording at a lower quality.`);
-      return;
-    }
-
-    // Check video duration (40s max)
-    try {
-      const duration = await new Promise<number>((resolve, reject) => {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.onloadedmetadata = () => {
-          URL.revokeObjectURL(video.src);
-          resolve(video.duration);
-        };
-        video.onerror = () => reject(new Error('Failed to load video'));
-        video.src = URL.createObjectURL(file);
-      });
-
-      if (duration > 40) {
-        toast.error(`Video is ${Math.round(duration)}s — must be 40 seconds or less.`);
-        return;
-      }
-    } catch {
-      toast.error("Could not read video duration.");
-      return;
-    }
-
     try {
       setUploadingVideo(exerciseType);
+      setVideoProgress({ stage: 'Reading video', percent: 0 });
+
+      const metadata = await getVideoMetadata(file);
+      const needsOptimization =
+        file.size > MAX_PR_VIDEO_SIZE_BYTES || metadata.duration > MAX_PR_VIDEO_DURATION_SECONDS;
+      let uploadFile = file;
+
+      if (needsOptimization) {
+        const stage = metadata.duration > MAX_PR_VIDEO_DURATION_SECONDS ? 'Trimming & compressing' : 'Compressing';
+        setVideoProgress({ stage, percent: 5 });
+        uploadFile = await optimizeVideoForUpload(file, metadata, (percent) => {
+          setVideoProgress({ stage, percent });
+        });
+        toast.success(`Video optimized from ${formatFileSize(file.size)} to ${formatFileSize(uploadFile.size)}.`);
+      }
+
+      if (uploadFile.size > MAX_PR_VIDEO_SIZE_BYTES) {
+        throw new Error(`Video is still ${formatFileSize(uploadFile.size)} after optimization. Please upload a shorter clip.`);
+      }
+
       setVideoProgress({ stage: 'Uploading', percent: 0 });
 
-      const fileExt = file.name.split('.').pop();
+      const fileExt = uploadFile.name.split('.').pop() || 'webm';
       const fileName = `${athleteId}/${exerciseType}-${Date.now()}.${fileExt}`;
 
       const uploadProgressInterval = setInterval(() => {
@@ -405,7 +586,7 @@ export default function Profile() {
 
       const { error: uploadError } = await supabase.storage
         .from('pr-videos')
-        .upload(fileName, file, { upsert: true });
+        .upload(fileName, uploadFile, { upsert: true });
 
       clearInterval(uploadProgressInterval);
 
