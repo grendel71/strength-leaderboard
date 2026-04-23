@@ -180,3 +180,19 @@ export const prVideoJudgments = pgTable("prVideoJudgments", {
 
 export type PrVideoJudgment = typeof prVideoJudgments.$inferSelect;
 export type InsertPrVideoJudgment = typeof prVideoJudgments.$inferInsert;
+
+export const prVideoComments = pgTable("prVideoComments", {
+  id: serial("id").primaryKey(),
+  athleteId: integer("athleteId").notNull(),
+  exerciseType: varchar("exerciseType", { length: 50 }).notNull(),
+  userId: integer("userId").notNull(),
+  comment: text("comment").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  athleteExerciseIdx: index("prVideoComments_ae_idx").on(table.athleteId, table.exerciseType),
+  userIdx: index("prVideoComments_user_idx").on(table.userId),
+  createdAtIdx: index("prVideoComments_created_idx").on(table.createdAt),
+}));
+
+export type PrVideoComment = typeof prVideoComments.$inferSelect;
+export type InsertPrVideoComment = typeof prVideoComments.$inferInsert;

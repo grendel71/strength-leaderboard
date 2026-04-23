@@ -2,7 +2,7 @@ import { eq, and, desc, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pkg from 'pg';
 const { Pool } = pkg;
-import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos, prVideoJudgments } from "../drizzle/schema";
+import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord, gyms, Gym, InsertGym, gymRequests, InsertGymRequest, prVideos, prVideoJudgments, prVideoComments } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
@@ -565,4 +565,36 @@ export async function submitPrVideoVote(athleteId: number, exerciseType: string,
         eq(prVideoJudgments.judgeId, judgeId)
       )
     );
+}
+
+export async function getAllPrVideoComments() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db
+    .select({
+      id: prVideoComments.id,
+      athleteId: prVideoComments.athleteId,
+      exerciseType: prVideoComments.exerciseType,
+      userId: prVideoComments.userId,
+      userName: users.name,
+      userEmail: users.email,
+      comment: prVideoComments.comment,
+      createdAt: prVideoComments.createdAt,
+    })
+    .from(prVideoComments)
+    .innerJoin(users, eq(prVideoComments.userId, users.id))
+    .orderBy(asc(prVideoComments.createdAt));
+}
+
+export async function addPrVideoComment(athleteId: number, exerciseType: string, userId: number, comment: string) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.insert(prVideoComments).values({
+    athleteId,
+    exerciseType,
+    userId,
+    comment,
+  });
 }

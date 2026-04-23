@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { User, InsertUser, users, athletes, InsertAthlete, weightEntries, InsertWeightEntry, liftRecords, InsertLiftRecord } from "../drizzle/schema";
-import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos, getRecentPrVideos, getPrVideoJudgments, getAllPrVideoJudgments, assignPrVideoJudges, submitPrVideoVote } from "./db";
+import { getAllAthletes, getAthleteById, getLiftRecordsForAthlete, getWeightEntriesForAthlete, addLiftRecord, addWeightEntry, updateLiftRecord, updateAthlete, getLeaderboardByExercise, importAthlete, enforceAthleteOwnership, linkUserToAthlete, getAllGyms, getGymById, getGymBySlug, getGymByInviteCode, createGym, updateAthleteGym, getAllUsers, updateUserRole, requestGymAdd, getAllGymRequests, updateGymRequestStatus, getGymRequestById, getUserById, getPrVideos, upsertPrVideo, deletePrVideo, getPrVideosByExercise, getAllPrVideos, getRecentPrVideos, getPrVideoJudgments, getAllPrVideoJudgments, assignPrVideoJudges, submitPrVideoVote, getAllPrVideoComments, addPrVideoComment } from "./db";
 
 export const appRouter = router({
   system: router({
@@ -364,7 +364,7 @@ export const appRouter = router({
       .query(() => getAllPrVideos()),
 
     getRecentPrVideos: publicProcedure
-      .input(z.object({ limit: z.number().int().min(1).max(20).optional() }).optional())
+      .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
       .query(({ input }) => getRecentPrVideos(input?.limit ?? 8)),
 
     getPrVideoJudgments: publicProcedure
@@ -373,6 +373,19 @@ export const appRouter = router({
 
     getAllPrVideoJudgments: publicProcedure
       .query(() => getAllPrVideoJudgments()),
+
+    getAllPrVideoComments: publicProcedure
+      .query(() => getAllPrVideoComments()),
+
+    addPrVideoComment: protectedProcedure
+      .input(z.object({
+        athleteId: z.number(),
+        exerciseType: z.string(),
+        comment: z.string().trim().min(1).max(280),
+      }))
+      .mutation(({ input, ctx }) =>
+        addPrVideoComment(input.athleteId, input.exerciseType, ctx.user.id, input.comment)
+      ),
 
     assignPrVideoJudges: protectedProcedure
       .input(z.object({

@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 // getLoginUrl removed
 
 type ExerciseId =
@@ -36,13 +37,17 @@ type RecentPrVideo = PrVideo & {
   createdAt: Date | string;
 };
 
+type LeaderboardView = "male" | "female" | "recent";
+
 export default function Leaderboard() {
   const { user, isAuthenticated, logout, loading } = useAuth();
   const [sortBy, setSortBy] = useState<ExerciseId>("total");
-  const [genderFilter, setGenderFilter] = useState<"male" | "female">("male");
+  const [leaderboardView, setLeaderboardView] = useState<LeaderboardView>("male");
   const [selectedGymId, setSelectedGymId] = useState<number | undefined>(undefined);
   const [hasSetInitialGym, setHasSetInitialGym] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<{ athleteId: number; name: string; url: string; exercise: string } | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const genderFilter = leaderboardView === "female" ? "female" : "male";
 
   const { data: gyms = [] } = trpc.gym.getAll.useQuery();
   const { data: athletes = [], isLoading } = trpc.leaderboard.getByExercise.useQuery({
@@ -53,7 +58,7 @@ export default function Leaderboard() {
 
   // Fetch ALL PR videos for the leaderboard
   const { data: allPrVideos = [] } = trpc.athlete.getAllPrVideos.useQuery();
-  const { data: recentPrVideos = [] } = trpc.athlete.getRecentPrVideos.useQuery({ limit: 8 });
+  const { data: recentPrVideos = [] } = trpc.athlete.getRecentPrVideos.useQuery({ limit: 50 });
   const athleteVideoMap = useMemo(() => {
     const map = new Map<number, PrVideo[]>();
     allPrVideos.forEach((video: PrVideo) => {
@@ -69,10 +74,17 @@ export default function Leaderboard() {
   );
 
   const { data: allJudgments = [], refetch: refetchJudgments } = trpc.athlete.getAllPrVideoJudgments.useQuery();
+  const { data: allComments = [], refetch: refetchComments } = trpc.athlete.getAllPrVideoComments.useQuery();
   const submitVoteMutation = trpc.athlete.submitPrVideoVote.useMutation({
     onSuccess: () => {
       refetchJudgments();
     }
+  });
+  const addCommentMutation = trpc.athlete.addPrVideoComment.useMutation({
+    onSuccess: () => {
+      setCommentDraft("");
+      refetchComments();
+    },
   });
 
   useEffect(() => {
@@ -105,6 +117,8 @@ export default function Leaderboard() {
     );
   const getVideoJudgments = (athleteId: number, exerciseType: string) =>
     allJudgments.filter((judgment) => judgment.athleteId === athleteId && judgment.exerciseType === exerciseType);
+  const getVideoComments = (athleteId: number, exerciseType: string) =>
+    allComments.filter((comment) => comment.athleteId === athleteId && comment.exerciseType === exerciseType);
   const formatUploadTime = (createdAt: Date | string) => {
     const uploadTime = new Date(createdAt).getTime();
     const diffSeconds = Math.max(1, Math.floor((Date.now() - uploadTime) / 1000));
@@ -125,6 +139,17 @@ export default function Leaderboard() {
       name: athleteName,
       url: video.videoUrl,
       exercise: video.exerciseType,
+    });
+  };
+  const submitComment = () => {
+    if (!playingVideo) return;
+    const comment = commentDraft.trim();
+    if (!comment) return;
+
+    addCommentMutation.mutate({
+      athleteId: playingVideo.athleteId,
+      exerciseType: playingVideo.exercise,
+      comment,
     });
   };
   const renderJudgmentStatus = (athleteId: number, exerciseType: string, variant: "mobile" | "desktop") => {
@@ -201,7 +226,9 @@ export default function Leaderboard() {
                 Strength Leaderboard
               </h1>
               <p className="text-muted-foreground text-sm md:text-lg uppercase font-bold tracking-widest italic flex items-center gap-2">
-                {selectedGymId
+                {leaderboardView === "recent"
+                  ? "Latest PR video uploads"
+                  : selectedGymId
                   ? gyms.find(g => g.id === selectedGymId)?.name
                   : "Global Rankings"}
                 <MapPin className="w-3 h-3 md:w-4 md:h-4 text-accent" />
@@ -210,6 +237,7 @@ export default function Leaderboard() {
 
             {/* Mobile-optimized controls */}
             <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+              {leaderboardView !== "recent" && (
               <Select
                 value={selectedGymId?.toString() || "global"}
                 onValueChange={(val: string) => setSelectedGymId(val === "global" ? undefined : parseInt(val))}
@@ -226,12 +254,13 @@ export default function Leaderboard() {
                   ))}
                 </SelectContent>
               </Select>
+              )}
 
-              {/* Gender Toggle */}
+              {/* View Toggle */}
               <div className="flex bg-card/50 border border-accent/20 rounded-lg p-1 h-11 md:h-10">
                 <button
-                  onClick={() => setGenderFilter("male")}
-                  className={`flex-1 px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${genderFilter === "male"
+                  onClick={() => setLeaderboardView("male")}
+                  className={`flex-1 px-3 sm:px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${leaderboardView === "male"
                       ? "bg-accent text-black shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                     }`}
@@ -239,13 +268,22 @@ export default function Leaderboard() {
                   🏋️ Men
                 </button>
                 <button
-                  onClick={() => setGenderFilter("female")}
-                  className={`flex-1 px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${genderFilter === "female"
+                  onClick={() => setLeaderboardView("female")}
+                  className={`flex-1 px-3 sm:px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 ${leaderboardView === "female"
                       ? "bg-accent text-black shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                     }`}
                 >
                   💪 Women
+                </button>
+                <button
+                  onClick={() => setLeaderboardView("recent")}
+                  className={`flex-1 px-3 sm:px-4 rounded-md text-xs font-black uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${leaderboardView === "recent"
+                      ? "bg-accent text-black shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  Recent Uploads
                 </button>
               </div>
 
@@ -282,7 +320,7 @@ export default function Leaderboard() {
 
       {/* Main content */}
       <div className="container py-12">
-        {recentPrVideos.length > 0 && (
+        {leaderboardView === "recent" ? (
           <section className="mb-8">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
               <div>
@@ -346,7 +384,8 @@ export default function Leaderboard() {
               ))}
             </div>
           </section>
-        )}
+        ) : (
+          <>
 
         {/* Exercise tabs */}
         <div className="mb-8">
@@ -705,10 +744,16 @@ export default function Leaderboard() {
             <div className="text-muted-foreground uppercase text-sm font-bold">Champion BW</div>
           </Card>
         </div>
+          </>
+        )}
       </div>
 
     {/* Video Playback & Judging Dialog */}
-    <Dialog open={!!playingVideo} onOpenChange={(open) => !open && setPlayingVideo(null)}>
+    <Dialog open={!!playingVideo} onOpenChange={(open) => {
+      if (open) return;
+      setPlayingVideo(null);
+      setCommentDraft("");
+    }}>
       <DialogContent className="sm:max-w-2xl bg-black border-accent/30 p-3 sm:p-6">
         <DialogTitle className="text-accent uppercase font-black tracking-widest text-xs sm:text-sm mb-4">
           {playingVideo?.name} — {getExerciseLabel(playingVideo?.exercise || "")} PR
@@ -782,6 +827,62 @@ export default function Leaderboard() {
                   </div>
                 );
               })()}
+            </div>
+
+            <div className="bg-card/60 border border-accent/10 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-accent">Comments</h4>
+                <span className="text-[10px] text-muted-foreground font-bold uppercase">
+                  {getVideoComments(playingVideo.athleteId, playingVideo.exercise).length}
+                </span>
+              </div>
+
+              <div className="space-y-3 max-h-44 overflow-y-auto pr-1 mb-4">
+                {getVideoComments(playingVideo.athleteId, playingVideo.exercise).length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">No comments yet. Start the thread.</p>
+                ) : (
+                  getVideoComments(playingVideo.athleteId, playingVideo.exercise).map((comment) => (
+                    <div key={comment.id} className="rounded-lg bg-black/30 border border-white/5 p-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-black uppercase text-foreground truncate">
+                          {comment.userName || comment.userEmail || "Member"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-bold shrink-0">
+                          {formatUploadTime(comment.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground break-words">{comment.comment}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {isAuthenticated ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={commentDraft}
+                    onChange={(event) => setCommentDraft(event.target.value)}
+                    maxLength={280}
+                    placeholder="Add a comment..."
+                    className="min-h-20 bg-black/30 border-accent/20 text-sm"
+                  />
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground font-bold">{commentDraft.length}/280</span>
+                    <Button
+                      onClick={submitComment}
+                      disabled={addCommentMutation.isPending || commentDraft.trim().length === 0}
+                      size="sm"
+                      className="bg-accent text-black hover:bg-accent/90 font-black uppercase"
+                    >
+                      Comment
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center">
+                  Login to comment on this PR video.
+                </p>
+              )}
             </div>
           </div>
         )}

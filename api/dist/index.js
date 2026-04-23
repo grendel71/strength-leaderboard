@@ -25167,6 +25167,18 @@ var prVideoJudgments = pgTable("prVideoJudgments", {
   judgeIdx: index("prVideoJudgments_judge_idx").on(table.judgeId),
   uniqueJudgment: index("prVideoJudgments_unique_idx").on(table.athleteId, table.exerciseType, table.judgeId)
 }));
+var prVideoComments = pgTable("prVideoComments", {
+  id: serial("id").primaryKey(),
+  athleteId: integer2("athleteId").notNull(),
+  exerciseType: varchar("exerciseType", { length: 50 }).notNull(),
+  userId: integer2("userId").notNull(),
+  comment: text("comment").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+}, (table) => ({
+  athleteExerciseIdx: index("prVideoComments_ae_idx").on(table.athleteId, table.exerciseType),
+  userIdx: index("prVideoComments_user_idx").on(table.userId),
+  createdAtIdx: index("prVideoComments_created_idx").on(table.createdAt)
+}));
 
 // server/db.ts
 var { Pool: Pool2 } = pkg;
@@ -25603,6 +25615,30 @@ async function submitPrVideoVote(athleteId, exerciseType, judgeId, vote) {
     )
   );
 }
+async function getAllPrVideoComments() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: prVideoComments.id,
+    athleteId: prVideoComments.athleteId,
+    exerciseType: prVideoComments.exerciseType,
+    userId: prVideoComments.userId,
+    userName: users.name,
+    userEmail: users.email,
+    comment: prVideoComments.comment,
+    createdAt: prVideoComments.createdAt
+  }).from(prVideoComments).innerJoin(users, eq(prVideoComments.userId, users.id)).orderBy(asc(prVideoComments.createdAt));
+}
+async function addPrVideoComment(athleteId, exerciseType, userId, comment) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(prVideoComments).values({
+    athleteId,
+    exerciseType,
+    userId,
+    comment
+  });
+}
 
 // server/routers.ts
 var appRouter = router({
@@ -25890,9 +25926,17 @@ var appRouter = router({
     getPrVideos: publicProcedure.input(external_exports.object({ athleteId: external_exports.number() })).query(({ input }) => getPrVideos(input.athleteId)),
     getPrVideosByExercise: publicProcedure.input(external_exports.object({ exerciseType: external_exports.string() })).query(({ input }) => getPrVideosByExercise(input.exerciseType)),
     getAllPrVideos: publicProcedure.query(() => getAllPrVideos()),
-    getRecentPrVideos: publicProcedure.input(external_exports.object({ limit: external_exports.number().int().min(1).max(20).optional() }).optional()).query(({ input }) => getRecentPrVideos(input?.limit ?? 8)),
+    getRecentPrVideos: publicProcedure.input(external_exports.object({ limit: external_exports.number().int().min(1).max(50).optional() }).optional()).query(({ input }) => getRecentPrVideos(input?.limit ?? 8)),
     getPrVideoJudgments: publicProcedure.input(external_exports.object({ athleteId: external_exports.number(), exerciseType: external_exports.string() })).query(({ input }) => getPrVideoJudgments(input.athleteId, input.exerciseType)),
     getAllPrVideoJudgments: publicProcedure.query(() => getAllPrVideoJudgments()),
+    getAllPrVideoComments: publicProcedure.query(() => getAllPrVideoComments()),
+    addPrVideoComment: protectedProcedure.input(external_exports.object({
+      athleteId: external_exports.number(),
+      exerciseType: external_exports.string(),
+      comment: external_exports.string().trim().min(1).max(280)
+    })).mutation(
+      ({ input, ctx }) => addPrVideoComment(input.athleteId, input.exerciseType, ctx.user.id, input.comment)
+    ),
     assignPrVideoJudges: protectedProcedure.input(external_exports.object({
       athleteId: external_exports.number(),
       exerciseType: external_exports.string(),
